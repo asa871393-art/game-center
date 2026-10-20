@@ -1,0 +1,740 @@
+// =============================================================================
+// Gaming Lounge Booking & Management Platform — Prisma schema
+//
+// Conventions
+// - IDs are cuid strings.
+// - Money is Decimal(12,2) in the lounge's currency; never Float.
+// - All timestamps are stored in UTC (Prisma writes UTC). Opening hours and pricing
+//   windows are stored as "minutes since local midnight" and interpreted in
+//   Lounge.timezone.
+// - A play "session" is a Booking. Walk-ins are Bookings with source WALK_IN,
+//   so the POS, the floor plan and reports all read from one table.
+// - Double-booking protection lives in the database as an exclusion constraint
+//   (see prisma/migrations/*_init/migration.sql), not only in app code.
+// =============================================================================
+
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+// -----------------------------------------------------------------------------
+// Enums
+// -----------------------------------------------------------------------------
+
+/// Platform-wide role. Lounge-level permissions come from LoungeMember.role.
+enum Role {
+  SUPER_ADMIN
+  LOUNGE_ADMIN
+  STAFF
+  CUSTOMER
+}
+
+/// Role of a user inside a specific lounge.
+enum LoungeMemberRole {
+  OWNER
+  MANAGER
+  STAFF
+}
+
+enum OrganizationStatus {
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum SubscriptionPlan {
+  STARTER
+  PRO
+  ENTERPRISE
+}
+
+enum SubscriptionStatus {
+  TRIALING
+  ACTIVE
+  PAST_DUE
+  CANCELLED
+}
+
+enum LoungeStatus {
+  DRAFT
+  ACTIVE
+  SUSPENDED
+  CLOSED
+}
+
+enum DeviceType {
+  PC
+  CONSOLE
+  VR
+  VIP_ROOM
+  SIMULATOR
+  OTHER
+}
+
+enum DeviceStatus {
+  IDLE
+  IN_USE
+  RESERVED
+  MAINTENANCE
+  OFFLINE
+}
+
+enum BookingStatus {
+  PENDING
+  CONFIRMED
+  ACTIVE
+  COMPLETED
+  CANCELLED
+  NO_SHOW
+}
+
+enum BookingSource {
+  ONLINE
+  WALK_IN
+  PHONE
+}
+
+enum PaymentStatus {
+  UNPAID
+  PARTIALLY_PAID
+  PAID
+  REFUNDED
+  PARTIALLY_REFUNDED
+}
+
+/// How the customer chose to pay at checkout.
+enum CheckoutMethod {
+  PAY_AT_LOUNGE
+  ZAINCASH
+  FASTPAY
+}
+
+enum MenuItemCategory {
+  DRINK
+  SNACK
+  MEAL
+  DESSERT
+  OTHER
+}
+
+enum CanteenOrderStatus {
+  PENDING
+  PREPARING
+  SERVED
+  CANCELLED
+}
+
+enum TransactionType {
+  PAYMENT
+  REFUND
+  WALLET_TOPUP
+  COMMISSION
+  PAYOUT
+  ADJUSTMENT
+}
+
+enum PaymentMethod {
+  CASH
+  CARD
+  WALLET
+  ONLINE
+}
+
+enum TransactionStatus {
+  PENDING
+  SUCCEEDED
+  FAILED
+  CANCELLED
+}
+
+enum PayoutStatus {
+  PENDING
+  PROCESSING
+  PAID
+  FAILED
+}
+
+// -----------------------------------------------------------------------------
+// Auth (Auth.js / NextAuth v5 Prisma adapter compatible)
+// -----------------------------------------------------------------------------
+
+model User {
+  id            String    @id @default(cuid())
+  name          String?
+  email         String?   @unique
+  emailVerified DateTime?
+  phone         String?   @unique
+  image         String?
+  /// bcrypt hash for credentials login; null for OAuth-only users.
+  passwordHash  String?
+  role          Role      @default(CUSTOMER)
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  accounts           Account[]
+  sessions           Session[]
+  wallet             Wallet?
+  memberships        LoungeMember[]
+  bookings           Booking[]          @relation("BookingCustomer")
+  bookingsCreated    Booking[]          @relation("BookingCreatedBy")
+  extensionsAdded    BookingExtension[]
+  canteenOrders      CanteenOrder[]     @relation("CanteenOrderCustomer")
+  canteenOrdersTaken CanteenOrder[]     @relation("CanteenOrderCreatedBy")
+  transactions       Transaction[]      @relation("TransactionUser")
+  transactionsTaken  Transaction[]      @relation("TransactionProcessedBy")
+  ownedOrganizations Organization[]
+  auditLogs          AuditLog[]
+
+  @@index([role])
+}
+
+model Account {
+  userId            String
+  type              String
+  provider          String
+  providerAccountId String
+  refresh_token     String? @db.Text
+  access_token      String? @db.Text
+  expires_at        Int?
+  token_type        String?
+  scope             String?
+  id_token          String? @db.Text
+  session_state     String?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([provider, providerAccountId])
+  @@index([userId])
+}
+
+model Session {
+  sessionToken String   @unique
+  userId       String
+  expires      DateTime
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model VerificationToken {
+  identifier String
+  token      String
+  expires    DateTime
+
+  @@id([identifier, token])
+}
+
+// -----------------------------------------------------------------------------
+// Multi-tenancy: Organization (tenant) -> Lounges
+// -----------------------------------------------------------------------------
+
+/// A tenant: one business that may run several lounge branches.
+model Organization {
+  id                String             @id @default(cuid())
+  name              String
+  slug              String             @unique
+  status            OrganizationStatus @default(ACTIVE)
+  ownerId           String
+  /// Platform commission on online bookings, in basis points (1000 = 10%).
+  commissionRateBps Int                @default(1000)
+  createdAt         DateTime           @default(now())
+  updatedAt         DateTime           @updatedAt
+
+  owner         User           @relation(fields: [ownerId], references: [id], onDelete: Restrict)
+  lounges       Lounge[]
+  subscriptions Subscription[]
+  payouts       Payout[]
+
+  @@index([ownerId])
+}
+
+model Subscription {
+  id                 String             @id @default(cuid())
+  organizationId     String
+  plan               SubscriptionPlan
+  status             SubscriptionStatus @default(TRIALING)
+  /// Monthly fee charged by the platform.
+  priceMonthly       Decimal            @db.Decimal(12, 2)
+  currency           String             @default("USD") @db.Char(3)
+  maxLounges         Int                @default(1)
+  maxDevices         Int                @default(20)
+  currentPeriodStart DateTime
+  currentPeriodEnd   DateTime
+  cancelAt           DateTime?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+
+  organization Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+
+  @@index([organizationId, status])
+}
+
+// -----------------------------------------------------------------------------
+// Lounge
+// -----------------------------------------------------------------------------
+
+model Lounge {
+  id             String       @id @default(cuid())
+  organizationId String
+  name           String
+  slug           String       @unique
+  description    String?      @db.Text
+  status         LoungeStatus @default(DRAFT)
+
+  // Location
+  addressLine String
+  city        String
+  region      String?
+  country     String  @db.Char(2) // ISO 3166-1 alpha-2
+  postalCode  String?
+  latitude    Float
+  longitude   Float
+  /// IANA timezone, e.g. "Asia/Baghdad". Used for opening hours and pricing windows.
+  timezone    String
+
+  phone         String?
+  email         String?
+  currency      String  @default("IQD") @db.Char(3)
+  /// Tax applied on top of subtotals, in basis points (1500 = 15%).
+  taxRateBps    Int     @default(0)
+  coverImageUrl String?
+
+  // Floor plan canvas size (grid units) for the interactive map.
+  floorPlanWidth  Int @default(24)
+  floorPlanHeight Int @default(16)
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  photos        LoungePhoto[]
+  openingHours  OpeningHours[]
+  members       LoungeMember[]
+  zones         FloorZone[]
+  categories    DeviceCategory[]
+  devices       Device[]
+  pricingRules  PricingRule[]
+  bookings      Booking[]
+  menuItems     MenuItem[]
+  canteenOrders CanteenOrder[]
+  transactions  Transaction[]
+
+  @@index([organizationId])
+  @@index([city, status])
+  @@index([latitude, longitude])
+}
+
+model LoungePhoto {
+  id        String   @id @default(cuid())
+  loungeId  String
+  url       String
+  alt       String?
+  sortOrder Int      @default(0)
+  createdAt DateTime @default(now())
+
+  lounge Lounge @relation(fields: [loungeId], references: [id], onDelete: Cascade)
+
+  @@index([loungeId, sortOrder])
+}
+
+/// Weekly opening hours. closesAtMinute <= opensAtMinute means the lounge
+/// closes after midnight (overnight shift).
+model OpeningHours {
+  id             String  @id @default(cuid())
+  loungeId       String
+  /// 0 = Sunday ... 6 = Saturday
+  dayOfWeek      Int     @db.SmallInt
+  opensAtMinute  Int     @db.SmallInt
+  closesAtMinute Int     @db.SmallInt
+  isClosed       Boolean @default(false)
+
+  lounge Lounge @relation(fields: [loungeId], references: [id], onDelete: Cascade)
+
+  @@unique([loungeId, dayOfWeek])
+}
+
+/// Staff/manager/owner access to a lounge.
+model LoungeMember {
+  id        String           @id @default(cuid())
+  loungeId  String
+  userId    String
+  role      LoungeMemberRole @default(STAFF)
+  isActive  Boolean          @default(true)
+  createdAt DateTime         @default(now())
+
+  lounge Lounge @relation(fields: [loungeId], references: [id], onDelete: Cascade)
+  user   User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([loungeId, userId])
+  @@index([userId])
+}
+
+// -----------------------------------------------------------------------------
+// Devices & floor plan
+// -----------------------------------------------------------------------------
+
+/// Named area on the floor plan, e.g. "Main Hall", "VIP Wing".
+model FloorZone {
+  id        String  @id @default(cuid())
+  loungeId  String
+  name      String
+  color     String? // hex, for the map legend
+  sortOrder Int     @default(0)
+
+  lounge  Lounge   @relation(fields: [loungeId], references: [id], onDelete: Cascade)
+  devices Device[]
+
+  @@unique([loungeId, name])
+}
+
+/// Per-lounge category such as "PC 240Hz", "PS5", "VR", "VIP Room".
+model DeviceCategory {
+  id                  String     @id @default(cuid())
+  loungeId            String
+  name                String
+  type                DeviceType
+  description         String?
+  /// Default price per hour before pricing rules are applied.
+  baseHourlyRate      Decimal    @db.Decimal(12, 2)
+  /// Max players per device/room (e.g. 4 for a PS5 couch, 8 for a VIP room).
+  capacity            Int        @default(1)
+  minBookingMinutes   Int        @default(60)
+  /// Booking start times snap to this grid (e.g. 30 = :00 / :30).
+  slotIntervalMinutes Int        @default(30)
+  /// Free-form specs shown to customers: { gpu, cpu, monitorHz, games: [] ... }
+  specs               Json?
+  iconName            String? // lucide icon name
+  isActive            Boolean    @default(true)
+  createdAt           DateTime   @default(now())
+  updatedAt           DateTime   @updatedAt
+
+  lounge       Lounge        @relation(fields: [loungeId], references: [id], onDelete: Cascade)
+  devices      Device[]
+  pricingRules PricingRule[]
+
+  @@unique([loungeId, name])
+  @@index([loungeId, type])
+}
+
+model Device {
+  id         String       @id @default(cuid())
+  loungeId   String
+  categoryId String
+  zoneId     String?
+  /// Human label shown on the grid, e.g. "PC-07", "PS5-A", "VIP Room 2".
+  name       String
+  /// Short stable code used by POS/hardware agents.
+  code       String
+  status     DeviceStatus @default(IDLE)
+  ipAddress  String?      @db.Inet
+  macAddress String?      @db.VarChar(17) // "AA:BB:CC:DD:EE:FF"
+  /// Overrides/extends the category specs for this unit.
+  specs      Json?
+  notes      String?
+
+  // Floor-plan placement (grid units)
+  posX     Int @default(0)
+  posY     Int @default(0)
+  width    Int @default(1)
+  height   Int @default(1)
+  rotation Int @default(0) @db.SmallInt
+
+  isBookableOnline Boolean   @default(true)
+  lastSeenAt       DateTime?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  lounge   Lounge         @relation(fields: [loungeId], references: [id], onDelete: Cascade)
+  category DeviceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  zone     FloorZone?     @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  bookings Booking[]
+
+  @@unique([loungeId, code])
+  @@unique([loungeId, name])
+  @@index([loungeId, status])
+  @@index([categoryId])
+}
+
+/// Time/day-based price override. The highest-priority active rule matching a
+/// slot wins; if none match, DeviceCategory.baseHourlyRate is used.
+model PricingRule {
+  id            String    @id @default(cuid())
+  loungeId      String
+  /// null = applies to every category in the lounge.
+  categoryId    String?
+  name          String
+  /// Days the rule applies to (0 = Sunday ... 6 = Saturday). Empty = every day.
+  daysOfWeek    Int[]     @db.SmallInt
+  startMinute   Int       @db.SmallInt
+  endMinute     Int       @db.SmallInt
+  /// Exactly one of hourlyRate / multiplierBps should be set.
+  hourlyRate    Decimal?  @db.Decimal(12, 2)
+  /// 10000 = 1.0x, 8000 = 20% off, 12500 = +25% peak surcharge.
+  multiplierBps Int?
+  priority      Int       @default(0)
+  validFrom     DateTime?
+  validTo       DateTime?
+  isActive      Boolean   @default(true)
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  lounge   Lounge          @relation(fields: [loungeId], references: [id], onDelete: Cascade)
+  category DeviceCategory? @relation(fields: [categoryId], references: [id], onDelete: Cascade)
+
+  @@index([loungeId, isActive, priority])
+}
+
+// -----------------------------------------------------------------------------
+// Bookings / play sessions
+// -----------------------------------------------------------------------------
+
+model Booking {
+  id          String        @id @default(cuid())
+  /// Short human reference shown on receipts, e.g. "GL-7K3P9Q".
+  reference   String        @unique
+  loungeId    String
+  deviceId    String
+  /// null for anonymous walk-ins.
+  customerId  String?
+  /// Staff member who created it (walk-ins / phone bookings).
+  createdById String?
+  source      BookingSource @default(ONLINE)
+  status      BookingStatus @default(PENDING)
+
+  // Guest details for walk-ins without an account
+  guestName  String?
+  guestPhone String?
+  players    Int     @default(1)
+
+  scheduledStart DateTime
+  scheduledEnd   DateTime
+  actualStart    DateTime?
+  actualEnd      DateTime?
+
+  // Price snapshot (frozen at booking/extension time)
+  currency        String         @db.Char(3)
+  hourlyRate      Decimal        @db.Decimal(12, 2)
+  playSubtotal    Decimal        @default(0) @db.Decimal(12, 2)
+  canteenSubtotal Decimal        @default(0) @db.Decimal(12, 2)
+  discountTotal   Decimal        @default(0) @db.Decimal(12, 2)
+  taxTotal        Decimal        @default(0) @db.Decimal(12, 2)
+  totalPrice      Decimal        @default(0) @db.Decimal(12, 2)
+  amountPaid      Decimal        @default(0) @db.Decimal(12, 2)
+  paymentStatus   PaymentStatus  @default(UNPAID)
+  checkoutMethod  CheckoutMethod @default(PAY_AT_LOUNGE)
+  /// Unpaid online-checkout holds are released after this instant.
+  expiresAt       DateTime?
+
+  notes        String?
+  cancelledAt  DateTime?
+  cancelReason String?
+  /// Optimistic-concurrency counter; bump on every POS mutation.
+  version      Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  lounge        Lounge             @relation(fields: [loungeId], references: [id], onDelete: Restrict)
+  device        Device             @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+  customer      User?              @relation("BookingCustomer", fields: [customerId], references: [id], onDelete: SetNull)
+  createdBy     User?              @relation("BookingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  extensions    BookingExtension[]
+  canteenOrders CanteenOrder[]
+  transactions  Transaction[]
+
+  @@index([deviceId, scheduledStart, scheduledEnd])
+  @@index([loungeId, status, scheduledStart])
+  @@index([customerId, scheduledStart])
+}
+
+/// Audit of "Extend +1hr" actions on a session.
+model BookingExtension {
+  id          String   @id @default(cuid())
+  bookingId   String
+  minutes     Int
+  price       Decimal  @db.Decimal(12, 2)
+  previousEnd DateTime
+  newEnd      DateTime
+  addedById   String?
+  createdAt   DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  addedBy User?   @relation(fields: [addedById], references: [id], onDelete: SetNull)
+
+  @@index([bookingId])
+}
+
+// -----------------------------------------------------------------------------
+// Canteen / POS
+// -----------------------------------------------------------------------------
+
+model MenuItem {
+  id            String           @id @default(cuid())
+  loungeId      String
+  name          String
+  description   String?
+  category      MenuItemCategory
+  price         Decimal          @db.Decimal(12, 2)
+  imageUrl      String?
+  sku           String?
+  /// null = stock not tracked.
+  stockQuantity Int?
+  isAvailable   Boolean          @default(true)
+  sortOrder     Int              @default(0)
+  createdAt     DateTime         @default(now())
+  updatedAt     DateTime         @updatedAt
+
+  lounge     Lounge             @relation(fields: [loungeId], references: [id], onDelete: Cascade)
+  orderItems CanteenOrderItem[]
+
+  @@unique([loungeId, sku])
+  @@index([loungeId, category, isAvailable])
+}
+
+/// A canteen order. Usually attached to a Booking (pre-order or added to an
+/// active seat from the POS); bookingId is null for counter sales.
+model CanteenOrder {
+  id          String             @id @default(cuid())
+  loungeId    String
+  bookingId   String?
+  customerId  String?
+  createdById String?
+  status      CanteenOrderStatus @default(PENDING)
+  /// Ordered in advance with an online booking; served when the session starts.
+  isPreOrder  Boolean            @default(false)
+  subtotal    Decimal            @db.Decimal(12, 2)
+  taxTotal    Decimal            @default(0) @db.Decimal(12, 2)
+  total       Decimal            @db.Decimal(12, 2)
+  notes       String?
+  servedAt    DateTime?
+  createdAt   DateTime           @default(now())
+  updatedAt   DateTime           @updatedAt
+
+  lounge       Lounge             @relation(fields: [loungeId], references: [id], onDelete: Restrict)
+  booking      Booking?           @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  customer     User?              @relation("CanteenOrderCustomer", fields: [customerId], references: [id], onDelete: SetNull)
+  createdBy    User?              @relation("CanteenOrderCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
+  items        CanteenOrderItem[]
+  transactions Transaction[]
+
+  @@index([loungeId, createdAt])
+  @@index([bookingId])
+}
+
+model CanteenOrderItem {
+  id         String  @id @default(cuid())
+  orderId    String
+  menuItemId String
+  /// Snapshots so receipts survive menu edits.
+  name       String
+  unitPrice  Decimal @db.Decimal(12, 2)
+  quantity   Int
+  lineTotal  Decimal @db.Decimal(12, 2)
+
+  order    CanteenOrder @relation(fields: [orderId], references: [id], onDelete: Cascade)
+  menuItem MenuItem     @relation(fields: [menuItemId], references: [id], onDelete: Restrict)
+
+  @@index([orderId])
+  @@index([menuItemId])
+}
+
+// -----------------------------------------------------------------------------
+// Money: wallet, transactions, payouts
+// -----------------------------------------------------------------------------
+
+model Wallet {
+  id        String   @id @default(cuid())
+  userId    String   @unique
+  balance   Decimal  @default(0) @db.Decimal(12, 2)
+  currency  String   @default("IQD") @db.Char(3)
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+}
+
+/// Immutable payment ledger. Amounts are always positive; direction is given
+/// by `type` (REFUND / PAYOUT move money out).
+model Transaction {
+  id             String            @id @default(cuid())
+  loungeId       String?
+  bookingId      String?
+  canteenOrderId String?
+  payoutId       String?
+  userId         String?
+  processedById  String?
+  type           TransactionType
+  method         PaymentMethod
+  status         TransactionStatus @default(PENDING)
+  amount         Decimal           @db.Decimal(12, 2)
+  currency       String            @db.Char(3)
+  /// Payment gateway name and its reference, for reconciliation/idempotency.
+  provider       String?
+  providerRef    String?
+  metadata       Json?
+  createdAt      DateTime          @default(now())
+
+  lounge       Lounge?       @relation(fields: [loungeId], references: [id], onDelete: SetNull)
+  booking      Booking?      @relation(fields: [bookingId], references: [id], onDelete: SetNull)
+  canteenOrder CanteenOrder? @relation(fields: [canteenOrderId], references: [id], onDelete: SetNull)
+  payout       Payout?       @relation(fields: [payoutId], references: [id], onDelete: SetNull)
+  user         User?         @relation("TransactionUser", fields: [userId], references: [id], onDelete: SetNull)
+  processedBy  User?         @relation("TransactionProcessedBy", fields: [processedById], references: [id], onDelete: SetNull)
+
+  @@unique([provider, providerRef])
+  @@index([loungeId, createdAt])
+  @@index([bookingId])
+  @@index([userId, createdAt])
+}
+
+/// Platform -> organization settlement for online payments, net of commission.
+model Payout {
+  id               String       @id @default(cuid())
+  organizationId   String
+  periodStart      DateTime
+  periodEnd        DateTime
+  grossAmount      Decimal      @db.Decimal(12, 2)
+  commissionAmount Decimal      @db.Decimal(12, 2)
+  netAmount        Decimal      @db.Decimal(12, 2)
+  currency         String       @db.Char(3)
+  status           PayoutStatus @default(PENDING)
+  paidAt           DateTime?
+  externalRef      String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  organization Organization  @relation(fields: [organizationId], references: [id], onDelete: Restrict)
+  transactions Transaction[]
+
+  @@index([organizationId, periodStart])
+}
+
+// -----------------------------------------------------------------------------
+// Audit
+// -----------------------------------------------------------------------------
+
+model AuditLog {
+  id         String   @id @default(cuid())
+  actorId    String?
+  loungeId   String?
+  action     String // e.g. "session.start", "session.extend", "booking.cancel"
+  entityType String
+  entityId   String
+  data       Json?
+  createdAt  DateTime @default(now())
+
+  actor User? @relation(fields: [actorId], references: [id], onDelete: SetNull)
+
+  @@index([loungeId, createdAt])
+  @@index([entityType, entityId])
+}

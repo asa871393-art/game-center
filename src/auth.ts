@@ -1,0 +1,90 @@
+import "server-only";
+import "next-auth/jwt";
+import { PrismaAdapter } from "@auth/prisma-adapter";
+import bcrypt from "bcryptjs";
+import NextAuth, { type DefaultSession } from "next-auth";
+import type { Provider } from "next-auth/providers";
+import Credentials from "next-auth/providers/credentials";
+import Google from "next-auth/providers/google";
+import { z } from "zod";
+import type { Role } from "@/generated/prisma/client";
+import { env, isGoogleAuthEnabled } from "@/lib/env";
+import { prisma } from "@/lib/prisma";
+
+declare module "next-auth" {
+  interface Session {
+    user: { id: string; role: Role } & DefaultSession["user"];
+  }
+  interface User {
+    role?: Role;
+  }
+}
+
+declare module "next-auth/jwt" {
+  interface JWT {
+    id?: string;
+    role?: Role;
+  }
+}
+
+/** bcrypt hash of a throwaway string, compared when the email is unknown so response time doesn't reveal it. */
+const DUMMY_HASH = "$2b$12$zdQSIdJfkheXRPdC7MXAGuDXdwFdCIBV2z2PugIMZviAtslfdpvKW";
+
+export const credentialsSchema = z.object({
+  email: z.email().trim().toLowerCase(),
+  password: z.string().min(8).max(128),
+});
+
+const providers: Provider[] = [
+  Credentials({
+    credentials: { email: {}, password: {} },
+    async authorize(raw) {
+      const parsed = credentialsSchema.safeParse(raw);
+      if (!parsed.success) return null;
+      const user = await prisma.user.findUnique({ where: { email: parsed.data.email } });
+      // Compare against a dummy hash when the user is missing to keep timing uniform.
+      const hash = user?.passwordHash ?? DUMMY_HASH;
+      const valid = await bcrypt.compare(parsed.data.password, hash);
+      if (!user || !user.passwordHash || !valid || !user.isActive) return null;
+      return { id: user.id, name: user.name, email: user.email, image: user.image, role: user.role };
+    },
+  }),
+];
+
+if (isGoogleAuthEnabled) {
+  providers.push(Google({ clientId: env.AUTH_GOOGLE_ID, clientSecret: env.AUTH_GOOGLE_SECRET }));
+}
+
+export const { handlers, auth, signIn, signOut } = NextAuth({
+  adapter: PrismaAdapter(prisma),
+  // Credentials sign-in requires JWT sessions.
+  session: { strategy: "jwt" },
+  secret: env.AUTH_SECRET,
+  trustHost: true,
+  providers,
+  pages: { signIn: "/ar/login", error: "/ar/login" },
+  callbacks: {
+    async jwt({ token, user, trigger }) {
+      if (user?.id) {
+        token.id = user.id;
+        // OAuth users come from the adapter without our custom fields.
+        token.role = user.role ?? (await prisma.user.findUnique({ where: { id: user.id }, select: { role: true } }))?.role;
+      } else if (trigger === "update" && token.id) {
+        token.role = (await prisma.user.findUnique({ where: { id: token.id }, select: { role: true } }))?.role;
+      }
+      return token;
+    },
+    session({ session, token }) {
+      if (token.id) session.user.id = token.id;
+      session.user.role = token.role ?? "CUSTOMER";
+      return session;
+    },
+    async signIn({ user, account }) {
+      if (account?.provider === "credentials") return true;
+      // Block OAuth sign-in for deactivated accounts.
+      if (!user.email) return false;
+      const existing = await prisma.user.findUnique({ where: { email: user.email }, select: { isActive: true } });
+      return existing?.isActive ?? true;
+    },
+  },
+});
