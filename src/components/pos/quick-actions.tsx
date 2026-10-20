@@ -35,7 +35,7 @@ import type { PriceTier } from "@/generated/prisma/enums";
 import { useI18n } from "@/i18n/client";
 import { formatDuration, formatTime, money } from "@/i18n/format";
 import { liveBill } from "@/lib/booking/live-bill";
-import { availableTiers, pricePlay, tierBps, type PricedCategory } from "@/lib/booking/session-billing";
+import { availableTiers, pricePlay, tierBps } from "@/lib/booking/session-billing";
 import { diffMinutes } from "@/lib/booking/time";
 import { cn } from "@/lib/utils";
 import {
@@ -56,7 +56,7 @@ import type { PosDevice, PosSession } from "@/server/queries/manage";
 import { discountAmount, DiscountEditor, type DiscountInput } from "./discount-editor";
 import { nextRowKey, PaymentSplit, paymentsBalance, type PaymentRow } from "./payment-split";
 import { printReceipt } from "./print";
-import { useBillContext, useLiveBill } from "./use-live-bill";
+import { useBillContext, useDevicePricing, useLiveBill } from "./use-live-bill";
 
 const FIXED_OPTIONS = [30, 60, 90, 120, 180, 240];
 const EXTEND_OPTIONS = [30, 60];
@@ -96,10 +96,6 @@ export function QuickActions({
       </DialogContent>
     </Dialog>
   );
-}
-
-function priced(c: { id: string; baseHourlyRate: number; multiTierBps: number | null; vipTierBps: number | null }): PricedCategory {
-  return { id: c.id, baseHourlyRate: c.baseHourlyRate, multiTierBps: c.multiTierBps, vipTierBps: c.vipTierBps };
 }
 
 function DeviceActions({
@@ -170,7 +166,9 @@ function StartSession({ device, now, onStarted }: { device: PosDevice; now: Date
   const { data } = usePos();
   const { pending, run } = usePosAction();
   const category = data.categories.find((c) => c.id === device.categoryId)!;
-  const tiers = availableTiers(category);
+  const pricingOf = useDevicePricing();
+  const rates = pricingOf(device.id)!;
+  const tiers = availableTiers(rates);
   const cur = data.lounge.currency;
 
   const maxFree = device.freeUntil ? diffMinutes(new Date(device.freeUntil), now) : 0;
@@ -193,8 +191,8 @@ function StartSession({ device, now, onStarted }: { device: PosDevice; now: Date
 
   const pricing = { timeZone: data.lounge.timezone, rules: data.pricingRules };
   // Rates right now, including time-of-day pricing rules.
-  const hourlyFor = (t: PriceTier) => pricePlay(pricing, priced(category), t, now, 60);
-  const fixedPrice = mode === "FIXED" && chosenMinutes ? pricePlay(pricing, priced(category), tier, now, chosenMinutes) : 0;
+  const hourlyFor = (t: PriceTier) => pricePlay(pricing, rates, t, now, 60);
+  const fixedPrice = mode === "FIXED" && chosenMinutes ? pricePlay(pricing, rates, tier, now, chosenMinutes) : 0;
 
   const start = () =>
     run(
@@ -434,7 +432,7 @@ function SessionHome({
   const { data } = usePos();
   const { pending, run } = usePosAction();
   const bill = useLiveBill(session, now)!;
-  const category = data.categories.find((c) => c.id === device.categoryId)!;
+  const pricingOf = useDevicePricing();
   const cur = data.lounge.currency;
   const ids = { locale, loungeId: data.lounge.id, bookingId: session.id, version: session.version };
   const overtime = bill.remainingMs !== null && bill.remainingMs < 0;
@@ -487,7 +485,7 @@ function SessionHome({
           icon={Layers}
           label={dict.pos.changeTier}
           onClick={() => onView("tier")}
-          disabled={pending || availableTiers(category).length < 2}
+          disabled={pending || availableTiers(pricingOf(device.id)!).length < 2}
         />
         <ActionButton icon={bill.paused ? Play : Pause} label={bill.paused ? dict.pos.resume : dict.pos.pause} onClick={togglePause} disabled={pending} />
         <ActionButton icon={ArrowLeftRight} label={dict.pos.transfer} onClick={() => onView("transfer")} disabled={pending || bill.paused} />
@@ -602,7 +600,7 @@ function TierView({ session, device, now, onDone }: { session: PosSession; devic
   const { dict, locale, t } = useI18n();
   const { data } = usePos();
   const { pending, run } = usePosAction();
-  const category = data.categories.find((c) => c.id === device.categoryId)!;
+  const rates = useDevicePricing()(device.id)!;
   const [tier, setTier] = useState<PriceTier>(session.priceTier);
   const cur = data.lounge.currency;
 
@@ -612,17 +610,17 @@ function TierView({ session, device, now, onDone }: { session: PosSession; devic
   if (session.mode === "FIXED" && tier !== session.priceTier) {
     const from = session.pausedAt ? new Date(session.pausedAt) : now;
     const remaining = Math.max(0, diffMinutes(new Date(session.scheduledEnd), from));
-    delta = pricePlay(pricing, priced(category), tier, now, remaining) - pricePlay(pricing, priced(category), session.priceTier, now, remaining);
+    delta = pricePlay(pricing, rates, tier, now, remaining) - pricePlay(pricing, rates, session.priceTier, now, remaining);
   }
 
   return (
     <div className="space-y-4">
       <BackBar title={dict.pos.changeTier} onBack={onDone} />
       <TierButtons
-        tiers={availableTiers(category)}
+        tiers={availableTiers(rates)}
         value={tier}
         onChange={setTier}
-        hourlyFor={(t) => pricePlay(pricing, priced(category), t, now, 60)}
+        hourlyFor={(t) => pricePlay(pricing, rates, t, now, 60)}
         currency={cur}
       />
       {session.mode === "FIXED" && tier !== session.priceTier && (
@@ -665,6 +663,7 @@ function TransferView({
   const { dict, locale, t } = useI18n();
   const { data } = usePos();
   const { pending, run } = usePosAction();
+  const pricingOf = useDevicePricing();
   const categories = new Map(data.categories.map((c) => [c.id, c]));
   const targets = data.devices.filter((d) => {
     const c = categories.get(d.categoryId);
@@ -675,7 +674,7 @@ function TransferView({
       c &&
       c.isActive &&
       c.capacity >= session.players &&
-      tierBps(c, session.priceTier) !== null
+      tierBps(pricingOf(d.id)!, session.priceTier) !== null
     );
   });
 

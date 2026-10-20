@@ -48,7 +48,7 @@ export async function listManagedLounges(userId: string, platformRole: Role) {
       city: true,
       status: true,
       members: { where: { userId }, select: { role: true } },
-      _count: { select: { devices: true } },
+      _count: { select: { devices: { where: { archivedAt: null } } } },
     },
   });
   return lounges.map((l) => ({

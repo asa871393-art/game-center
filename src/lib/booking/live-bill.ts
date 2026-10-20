@@ -48,11 +48,15 @@ export interface LiveBill {
   paused: boolean;
 }
 
+const UNKNOWN_CATEGORY: PricedCategory = { id: "", baseHourlyRate: 0, multiTierBps: null, vipTierBps: null };
+
 export function liveBill(session: LiveSessionInput, ctx: LiveBillContext, now: Date): LiveBill {
   const paused = session.pausedAt !== null;
   const clock = paused ? new Date(session.pausedAt!) : now;
   const segments = session.segments.flatMap((s) => {
-    const category = ctx.categoryOf(s.deviceId);
+    // Closed segments carry their price; only a running one needs its device's rates
+    // (a device the session left may since have been archived).
+    const category = ctx.categoryOf(s.deviceId) ?? (s.endedAt ? UNKNOWN_CATEGORY : undefined);
     if (!category) return [];
     return [
       {

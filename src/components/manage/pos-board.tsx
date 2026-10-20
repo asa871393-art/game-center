@@ -1,9 +1,11 @@
 "use client";
 
-import { Activity, CalendarClock, CheckCircle2, Coffee, Wallet } from "lucide-react";
+import { Activity, CalendarClock, CheckCircle2, Coffee, Settings2, Wallet } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
+import { buttonVariants } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { useI18n } from "@/i18n/client";
@@ -27,8 +29,8 @@ export function PosBoard({ data, canManageDevices }: { data: PosBoardData; canMa
 }
 
 function Board() {
-  const { dict, locale, dir, t } = useI18n();
-  const { data } = usePos();
+  const { dict, locale, dir, t, href } = useI18n();
+  const { data, canManageDevices } = usePos();
   const now = useNow(data.generatedAt);
   const refresh = useDebouncedRefresh();
   const live = useLiveEvents<BoardEvent>(`/api/manage/${data.lounge.id}/events`, {
@@ -66,6 +68,11 @@ function Board() {
           {!data.businessDay.isOpen && <Badge variant="outline">{dict.manage.closedNow}</Badge>}
           <ConnectionBadge status={live} />
           <span suppressHydrationWarning>{t(dict.manage.updatedAt, { time: formatTime(locale, data.generatedAt, tz) })}</span>
+          {canManageDevices && (
+            <Link href={href(`/pos/${data.lounge.id}/devices`)} className={buttonVariants({ variant: "outline", size: "sm" })}>
+              <Settings2 aria-hidden /> {dict.devices.title}
+            </Link>
+          )}
         </div>
       </header>
 

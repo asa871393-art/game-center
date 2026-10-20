@@ -168,6 +168,12 @@ function Organization({ org, locale, dict }: { org: Org; locale: Locale; dict: D
                     >
                       {dict.admin.openBoard}
                     </Link>
+                    <Link
+                      href={localePath(locale, `/pos/${l.id}/devices`)}
+                      className={buttonVariants({ size: "sm", variant: "ghost" })}
+                    >
+                      {dict.devices.title}
+                    </Link>
                     <LoungeStatusToggle loungeId={l.id} name={l.name} status={l.status} />
                   </div>
                 </TableCell>

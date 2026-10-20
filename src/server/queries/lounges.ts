@@ -39,7 +39,7 @@ const summarySelect = {
   currency: true,
   categories: {
     where: { isActive: true },
-    select: { type: true, baseHourlyRate: true, _count: { select: { devices: true } } },
+    select: { type: true, baseHourlyRate: true, _count: { select: { devices: { where: { archivedAt: null } } } } },
   },
 } satisfies Prisma.LoungeSelect;
 
@@ -92,7 +92,7 @@ export async function getLoungeDetails(slug: string) {
       openingHours: { orderBy: { dayOfWeek: "asc" } },
       zones: { orderBy: { sortOrder: "asc" } },
       categories: { where: { isActive: true }, orderBy: { baseHourlyRate: "asc" } },
-      devices: { orderBy: [{ posY: "asc" }, { posX: "asc" }] },
+      devices: { where: { archivedAt: null }, orderBy: [{ posY: "asc" }, { posX: "asc" }] },
       pricingRules: { where: { isActive: true } },
       menuItems: { where: { isAvailable: true }, orderBy: [{ category: "asc" }, { sortOrder: "asc" }] },
     },
@@ -140,6 +140,8 @@ export async function getLoungeDetails(slug: string) {
       zoneId: d.zoneId,
       status: d.status,
       isBookableOnline: d.isBookableOnline,
+      /** Device rate override, or null to use the category's. */
+      hourlyRate: d.hourlyRateOverride === null ? null : toMinor(d.hourlyRateOverride),
       posX: d.posX,
       posY: d.posY,
       width: d.width,

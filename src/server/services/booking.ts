@@ -124,7 +124,7 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
     include: {
       openingHours: true,
       pricingRules: { where: { isActive: true } },
-      devices: { where: { id: input.deviceId }, include: { category: true } },
+      devices: { where: { id: input.deviceId, archivedAt: null }, include: { category: true } },
     },
   });
   const device = lounge?.devices[0];
@@ -181,7 +181,8 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
     durationMinutes,
     timeZone: lounge.timezone,
     categoryId: category.id,
-    baseHourlyRate: toMinor(category.baseHourlyRate),
+    // A device may override its category's rate.
+    baseHourlyRate: toMinor(device.hourlyRateOverride ?? category.baseHourlyRate),
     rules,
     taxRateBps: lounge.taxRateBps,
     addOns: lines,

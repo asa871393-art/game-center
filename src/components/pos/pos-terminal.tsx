@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardList, LayoutDashboard, ShoppingCart } from "lucide-react";
+import { ClipboardList, LayoutDashboard, Settings2, ShoppingCart } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useState } from "react";
 import { toast } from "sonner";
@@ -52,7 +52,7 @@ const liveDot: Record<LiveStatus, string> = {
 
 function Terminal({ cashierName }: { cashierName: string }) {
   const { dict, locale, href, dir, intl } = useI18n();
-  const { data } = usePos();
+  const { data, canManageDevices } = usePos();
   const now = useNow(data.generatedAt);
   const refresh = useDebouncedRefresh();
   const live = useLiveEvents<FeedEvent>(`/api/manage/${data.lounge.id}/events`, {
@@ -122,6 +122,16 @@ function Terminal({ cashierName }: { cashierName: string }) {
           <Suspense>
             <LocaleSwitcher />
           </Suspense>
+          {canManageDevices && (
+            <Link
+              href={href(`/pos/${data.lounge.id}/devices`)}
+              className={buttonVariants({ variant: "ghost", size: "icon-lg" })}
+              title={dict.devices.title}
+            >
+              <Settings2 aria-hidden />
+              <span className="sr-only">{dict.devices.title}</span>
+            </Link>
+          )}
           <Link href={href(`/manage/${data.lounge.id}`)} className={buttonVariants({ variant: "ghost", size: "icon-lg" })} title={dict.nav.dashboard}>
             <LayoutDashboard aria-hidden />
             <span className="sr-only">{dict.nav.dashboard}</span>

@@ -4,7 +4,7 @@ import { Ban, Clock, LogIn, Play, Plus, Power, ReceiptText, ShoppingBag, UserX, 
 import Link from "next/link";
 import { useState } from "react";
 import { deviceTypeMeta } from "@/components/lounge/device-type";
-import { useLiveBill } from "@/components/pos/use-live-bill";
+import { useDevicePricing, useLiveBill } from "@/components/pos/use-live-bill";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -129,7 +129,7 @@ function WalkInSection({ device, now }: { device: PosDevice; now: Date }) {
           durationMinutes: chosen,
           timeZone: tz,
           categoryId: category.id,
-          baseHourlyRate: category.baseHourlyRate,
+          baseHourlyRate: device.hourlyRateOverride ?? category.baseHourlyRate,
           rules: data.pricingRules,
           taxRateBps: data.lounge.taxRateBps,
           addOns: [],
@@ -253,10 +253,10 @@ function SessionSection({ session, device, now }: { session: PosSession; device:
   const [checkoutOpen, setCheckoutOpen] = useState(false);
   const tz = data.lounge.timezone;
   const cur = data.lounge.currency;
-  const category = data.categories.find((c) => c.id === device.categoryId)!;
 
   const end = new Date(session.scheduledEnd);
   const bill = useLiveBill(session, now)!;
+  const rates = useDevicePricing()(device.id)!;
   // OPEN sessions count up; FIXED count down (frozen while paused).
   const remainingMs = bill.remainingMs ?? 0;
   const isOpen = session.mode === "OPEN";
@@ -334,7 +334,7 @@ function SessionSection({ session, device, now }: { session: PosSession; device:
 
       <div className={cn("grid grid-cols-2 gap-2", isOpen && "hidden")}>
         {EXTEND_OPTIONS.map((m) => {
-          const price = pricePlay({ timeZone: tz, rules: data.pricingRules }, category, session.priceTier, end, m);
+          const price = pricePlay({ timeZone: tz, rules: data.pricingRules }, rates, session.priceTier, end, m);
           return (
             <Button key={m} variant="outline" onClick={() => extend(m)} disabled={pending} className="h-auto flex-col py-2">
               <span className="flex items-center gap-1 font-semibold">

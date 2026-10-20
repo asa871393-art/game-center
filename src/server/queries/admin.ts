@@ -22,7 +22,7 @@ export async function getPlatformOverview(now = new Date()) {
         subscriptions: { orderBy: { currentPeriodEnd: "desc" }, take: 1 },
         lounges: {
           orderBy: [{ city: "asc" }, { name: "asc" }],
-          select: { id: true, name: true, slug: true, city: true, status: true, currency: true, _count: { select: { devices: true } } },
+          select: { id: true, name: true, slug: true, city: true, status: true, currency: true, _count: { select: { devices: { where: { archivedAt: null } } } } },
         },
       },
     }),

@@ -486,8 +486,17 @@ model Device {
 
   isBookableOnline Boolean   @default(true)
   lastSeenAt       DateTime?
-  createdAt        DateTime  @default(now())
-  updatedAt        DateTime  @updatedAt
+
+  /// Per-device pricing; null = use the category's. Tier overrides are multipliers like the category's.
+  hourlyRateOverride   Decimal? @db.Decimal(12, 2)
+  multiTierBpsOverride Int?
+  vipTierBpsOverride   Int?
+
+  /// Archived devices keep their booking history but leave the floor, POS and booking site.
+  archivedAt DateTime?
+
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 
   lounge   Lounge           @relation(fields: [loungeId], references: [id], onDelete: Cascade)
   category DeviceCategory   @relation(fields: [categoryId], references: [id], onDelete: Restrict)

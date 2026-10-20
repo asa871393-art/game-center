@@ -1,11 +1,7 @@
 "use server";
 
-import { refresh } from "next/cache";
 import { z } from "zod";
-import { auth } from "@/auth";
-import type { LoungeMemberRole } from "@/generated/prisma/client";
-import type { Dictionary } from "@/i18n/dictionaries/ar";
-import { getDictionaryFor } from "@/i18n/server";
+import { actionId as id, loungeScoped as base, runLoungeAction as run, type PosActionResult } from "./pipeline";
 import {
   addSessionOrder,
   cancelBooking,
@@ -18,23 +14,15 @@ import {
   markNoShow,
   markOrderServed,
   pauseSession,
-  PosError,
   resumeSession,
   setDeviceStatus,
   startWalkIn,
   transferSession,
-  type PosContext,
-  type PosErrorCode,
 } from "@/server/services/pos";
 import { closeShift, openShift } from "@/server/services/shift";
-import { getLoungeAccess, hasLoungeRole } from "@/server/staff";
 
-export type PosActionResult<T = null> =
-  | { ok: true; data: T }
-  | { ok: false; error: string; code?: PosErrorCode | "UNAUTHENTICATED" | "FORBIDDEN" | "VALIDATION" };
+export type { PosActionResult };
 
-const id = z.string().min(1).max(64);
-const base = z.object({ locale: z.string().max(5), loungeId: id });
 const versioned = base.extend({ bookingId: id, version: z.number().int().min(0) });
 const lines = z.array(z.object({ menuItemId: id, quantity: z.number().int().min(1).max(20) })).min(1).max(30);
 const tier = z.enum(["SINGLE", "MULTI", "VIP"]);
@@ -47,49 +35,6 @@ const payments = z
     }),
   )
   .max(6);
-
-function errorMessage(dict: Dictionary, code: PosErrorCode): string {
-  return dict.manage.errors[code];
-}
-
-/**
- * Shared action pipeline: validate, authenticate, authorize against the
- * lounge (from the database), run, and refresh the board.
- */
-async function run<S extends typeof base, T>(
-  schema: S,
-  payload: unknown,
-  minRole: LoungeMemberRole,
-  fn: (ctx: PosContext, input: z.infer<S>) => Promise<T>,
-): Promise<PosActionResult<T>> {
-  const locale = (payload as { locale?: unknown } | null)?.locale;
-  const dict = await getDictionaryFor(typeof locale === "string" ? locale : "ar");
-
-  const parsed = schema.safeParse(payload);
-  if (!parsed.success) return { ok: false, error: dict.errors.validation, code: "VALIDATION" };
-
-  const session = await auth();
-  if (!session?.user?.id) return { ok: false, error: dict.errors.unauthenticated, code: "UNAUTHENTICATED" };
-
-  const access = await getLoungeAccess(session.user.id, parsed.data.loungeId);
-  if (!access || !hasLoungeRole(access, minRole)) {
-    return { ok: false, error: dict.manage.errors.FORBIDDEN, code: "FORBIDDEN" };
-  }
-
-  try {
-    const data = await fn({ loungeId: access.loungeId, actorId: session.user.id }, parsed.data);
-    refresh();
-    return { ok: true, data };
-  } catch (error) {
-    if (error instanceof PosError) {
-      // Someone else changed it: show the latest state along with the message.
-      if (error.code === "STALE" || error.code === "PAYMENT_MISMATCH") refresh();
-      return { ok: false, error: errorMessage(dict, error.code), code: error.code };
-    }
-    console.error("POS action failed", error);
-    return { ok: false, error: dict.errors.generic };
-  }
-}
 
 const walkInSchema = base.extend({
   deviceId: id,

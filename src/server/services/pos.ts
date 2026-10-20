@@ -2,7 +2,7 @@ import "server-only";
 import type { BookingStatus, PriceTier, Prisma } from "@/generated/prisma/client";
 import { PRICING_STEP_MINUTES, type PricingRuleInput } from "@/lib/booking/pricing";
 import { findContainingWindow, type Interval } from "@/lib/booking/schedule";
-import { billableMinutes, pricePlay, tierBps, type PlayPricing, type PricedCategory } from "@/lib/booking/session-billing";
+import { billableMinutes, pricePlay, tierBps, withDeviceRates, type PlayPricing, type PricedCategory } from "@/lib/booking/session-billing";
 import { addMinutes, diffMinutes } from "@/lib/booking/time";
 import { computeBookingTotals, paymentStatusFor } from "@/lib/booking/totals";
 import { applyBps, fromMinor, toMinor, type Minor } from "@/lib/money";
@@ -41,6 +41,11 @@ export type PosErrorCode =
   | "DISCOUNT_INVALID"
   | "SHIFT_CLOSED"
   | "SHIFT_ALREADY_OPEN"
+  | "NAME_TAKEN"
+  | "CODE_TAKEN"
+  | "HAS_UPCOMING_BOOKINGS"
+  | "CATEGORY_IN_USE"
+  | "INVALID_INPUT"
   | "PAID_BOOKING";
 
 export class PosError extends Error {
@@ -122,18 +127,26 @@ async function loadLounge(loungeId: string) {
 
 type LoungePricing = Awaited<ReturnType<typeof loadLounge>>;
 
-function priced(category: {
-  id: string;
-  baseHourlyRate: { toString(): string };
-  multiTierBps: number | null;
-  vipTierBps: number | null;
+/** Effective pricing of a device: its own rate overrides, else its category's. */
+export function pricedDevice(device: {
+  hourlyRateOverride: { toString(): string } | null;
+  multiTierBpsOverride: number | null;
+  vipTierBpsOverride: number | null;
+  category: { id: string; baseHourlyRate: { toString(): string }; multiTierBps: number | null; vipTierBps: number | null };
 }): PricedCategory {
-  return {
-    id: category.id,
-    baseHourlyRate: toMinor(category.baseHourlyRate),
-    multiTierBps: category.multiTierBps,
-    vipTierBps: category.vipTierBps,
-  };
+  return withDeviceRates(
+    {
+      id: device.category.id,
+      baseHourlyRate: toMinor(device.category.baseHourlyRate),
+      multiTierBps: device.category.multiTierBps,
+      vipTierBps: device.category.vipTierBps,
+    },
+    {
+      hourlyRateOverride: device.hourlyRateOverride === null ? null : toMinor(device.hourlyRateOverride),
+      multiTierBpsOverride: device.multiTierBpsOverride,
+      vipTierBpsOverride: device.vipTierBpsOverride,
+    },
+  );
 }
 
 function audit(tx: Tx, ctx: PosContext, action: string, entityType: string, entityId: string, data?: Prisma.InputJsonValue) {
@@ -239,12 +252,30 @@ async function closeSegment(tx: Tx, lounge: LoungePricing, bookingId: string, mo
   const end = until < running.startedAt ? running.startedAt : until;
   const minutes = billableMinutes(running.startedAt, end);
   const amount =
-    mode === "OPEN" ? pricePlay(lounge.pricing, priced(running.device.category), running.priceTier, running.startedAt, minutes) : null;
+    mode === "OPEN" ? pricePlay(lounge.pricing, pricedDevice(running.device), running.priceTier, running.startedAt, minutes) : null;
   await tx.sessionSegment.update({
     where: { id: running.id },
     data: { endedAt: end, minutes, amount: amount === null ? null : fromMinor(amount) },
   });
   return amount ?? 0;
+}
+
+/**
+ * Call BEFORE changing a device's rates: running open sessions on it are billed
+ * up to `now` at the old rates and continue in a new segment, so a price
+ * change never applies retroactively.
+ */
+export async function splitOpenSegmentsOnDevice(tx: Tx, loungeId: string, deviceId: string, now: Date) {
+  const sessions = await tx.booking.findMany({
+    where: { deviceId, loungeId, status: "ACTIVE", mode: "OPEN", pausedAt: null },
+    select: { id: true, priceTier: true },
+  });
+  if (sessions.length === 0) return;
+  const lounge = await loadLounge(loungeId);
+  for (const s of sessions) {
+    await closeSegment(tx, lounge, s.id, "OPEN", now);
+    await openSegment(tx, s.id, deviceId, s.priceTier, now);
+  }
 }
 
 async function openPlayTotal(tx: Tx, bookingId: string): Promise<Minor> {
@@ -274,7 +305,7 @@ export async function startWalkIn(ctx: PosContext, input: StartWalkInInput) {
   const tier = input.priceTier ?? "SINGLE";
   const lounge = await loadLounge(ctx.loungeId);
   const device = await prisma.device.findFirst({
-    where: { id: input.deviceId, loungeId: ctx.loungeId },
+    where: { id: input.deviceId, loungeId: ctx.loungeId, archivedAt: null },
     include: { category: true },
   });
   if (!device) throw new PosError("NOT_FOUND");
@@ -284,7 +315,7 @@ export async function startWalkIn(ctx: PosContext, input: StartWalkInInput) {
   if (!Number.isInteger(input.players) || input.players < 1 || input.players > device.category.capacity) {
     throw new PosError("TOO_MANY_PLAYERS");
   }
-  const category = priced(device.category);
+  const category = pricedDevice(device);
   requireTier(category, tier);
 
   let fixedEnd: Date | null = null;
@@ -405,7 +436,7 @@ export async function extendSession(ctx: PosContext, input: { bookingId: string;
         throw new PosError("OUTSIDE_HOURS");
       }
 
-      const price = pricePlay(lounge.pricing, priced(booking.device.category), booking.priceTier, previousEnd, minutes);
+      const price = pricePlay(lounge.pricing, pricedDevice(booking.device), booking.priceTier, previousEnd, minutes);
       const playSubtotal = toMinor(booking.playSubtotal) + price;
       await guardedUpdate(tx, booking, {
         scheduledEnd: newEnd,
@@ -433,7 +464,7 @@ export async function changeTier(ctx: PosContext, input: { bookingId: string; ve
   const lounge = await loadLounge(ctx.loungeId);
   return prisma.$transaction(async (tx) => {
     const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
-    const category = priced(booking.device.category);
+    const category = pricedDevice(booking.device);
     requireTier(category, input.tier);
     if (booking.priceTier === input.tier) return { delta: 0 };
 
@@ -527,7 +558,7 @@ export async function transferSession(ctx: PosContext, input: { bookingId: strin
       if (booking.deviceId === input.targetDeviceId) throw new PosError("INVALID_STATE");
 
       const target = await tx.device.findFirst({
-        where: { id: input.targetDeviceId, loungeId: ctx.loungeId },
+        where: { id: input.targetDeviceId, loungeId: ctx.loungeId, archivedAt: null },
         include: { category: true },
       });
       if (!target) throw new PosError("NOT_FOUND");
@@ -535,8 +566,8 @@ export async function transferSession(ctx: PosContext, input: { bookingId: strin
         throw new PosError("DEVICE_UNAVAILABLE");
       }
       if (booking.players > target.category.capacity) throw new PosError("TOO_MANY_PLAYERS");
-      const fromCategory = priced(booking.device.category);
-      const toCategory = priced(target.category);
+      const fromCategory = pricedDevice(booking.device);
+      const toCategory = pricedDevice(target);
       requireTier(toCategory, booking.priceTier);
       await assertDeviceFree(tx, target.id);
 

@@ -25,7 +25,7 @@ export async function getPosBoard(loungeId: string, now = new Date()) {
       openingHours: true,
       zones: { orderBy: { sortOrder: "asc" } },
       categories: { orderBy: { baseHourlyRate: "asc" } },
-      devices: { orderBy: [{ posY: "asc" }, { posX: "asc" }] },
+      devices: { where: { archivedAt: null }, orderBy: [{ posY: "asc" }, { posX: "asc" }] },
       pricingRules: { where: { isActive: true } },
       menuItems: { orderBy: [{ category: "asc" }, { sortOrder: "asc" }] },
     },
@@ -157,6 +157,10 @@ export async function getPosBoard(loungeId: string, now = new Date()) {
       posY: d.posY,
       width: d.width,
       height: d.height,
+      /** Per-device pricing overrides (null = category's). */
+      hourlyRateOverride: d.hourlyRateOverride === null ? null : toMinor(d.hourlyRateOverride),
+      multiTierBpsOverride: d.multiTierBpsOverride,
+      vipTierBpsOverride: d.vipTierBpsOverride,
       currentBookingId: current?.id ?? null,
       nextBookingId: next?.id ?? null,
       /** Latest end for a walk-in starting now: the next booking or closing time. */

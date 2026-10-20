@@ -137,6 +137,24 @@ online.
 **Walk-in canteen sales** use a side panel docked beside the device grid (it overlays the grid on tablets): tap items,
 split payment, print a receipt. The menu includes a **hookah** category.
 
+**Device management** (`/[locale]/pos/[loungeId]/devices`, managers and owners; linked from the POS top bar, the
+dashboard and `/admin`):
+- **Devices** grouped by category, showing status, effective Single / Multi / VIP rates, specs, IP/MAC and zone.
+  Quick actions are Edit, Change status (Active / Maintenance / Out of order) and Delete.
+- **Add / edit form:**
+  - Basics: name/number, code (derived from the name if empty), category, zone, status, bookable online.
+  - Rates: optional per-device Single / Multi / VIP rates; empty means inherit the category.
+  - Hardware: specs description, IP (IPv4/IPv6) and MAC (normalized), for future remote control and locking.
+  - Floor-map position: automatic in the first free spot if left empty.
+- **Delete:** a never-used device is deleted; one with history is **archived** so receipts and reports stay intact,
+  and it can be **restored** (in maintenance). Both are refused while a session is running or bookings are upcoming,
+  and the confirmation dialog shows why.
+- **Categories:** add or edit name, type, default Single / Multi / VIP hourly rates, max players, minimum booking,
+  start-time interval, and active flag. Only empty categories can be deleted; deactivate the others.
+- **Pricing:** a device's rate overrides its category's everywhere: online booking, POS start, extend, tier change,
+  transfer and live bills. Time-of-day rules still apply on top. Changing a rate while an open session is running bills
+  the time so far at the old rate and the rest at the new one.
+
 **Thermal receipts:** `/[locale]/receipt/[id]` (a session's booking id or a counter sale's order id) is an 80mm layout
 (`@page { size: 80mm auto }`, 72mm printable). It is black on white, RTL in Arabic, and itemized with each payment
 method, cash given and change. While a session is still running it prints as a *provisional bill*. The POS prints it

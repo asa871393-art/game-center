@@ -120,12 +120,12 @@ export function BookingDialog({ lounge, checkoutOptions, isSignedIn, liveTick = 
       durationMinutes: draft.durationMinutes,
       timeZone: lounge.timezone,
       categoryId: category.id,
-      baseHourlyRate: category.baseHourlyRate,
+      baseHourlyRate: device?.hourlyRate ?? category.baseHourlyRate,
       rules: lounge.pricingRules,
       taxRateBps: lounge.taxRateBps,
       addOns,
     });
-  }, [category, draft.start, draft.durationMinutes, draft.addOns, lounge]);
+  }, [category, device, draft.start, draft.durationMinutes, draft.addOns, lounge]);
 
   if (!device || !category) return null;
 

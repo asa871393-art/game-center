@@ -41,6 +41,27 @@ export interface PricedCategory extends TierConfig {
   baseHourlyRate: Minor;
 }
 
+export interface DeviceRateOverrides {
+  hourlyRateOverride: Minor | null;
+  multiTierBpsOverride: number | null;
+  vipTierBpsOverride: number | null;
+}
+
+/**
+ * A device's effective pricing: its own overrides where set, else its
+ * category's. The category id is kept, so time-of-day rules aimed at the
+ * category still apply (multiplier rules scale the device rate; fixed-rate
+ * rules replace it).
+ */
+export function withDeviceRates(category: PricedCategory, device: DeviceRateOverrides): PricedCategory {
+  return {
+    id: category.id,
+    baseHourlyRate: device.hourlyRateOverride ?? category.baseHourlyRate,
+    multiTierBps: device.multiTierBpsOverride ?? category.multiTierBps,
+    vipTierBps: device.vipTierBpsOverride ?? category.vipTierBps,
+  };
+}
+
 /**
  * Price of `minutes` of play starting at `start` on a category at a tier:
  * the time-of-day pricing rules first, then the tier multiplier.
