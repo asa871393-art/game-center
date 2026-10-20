@@ -1,10 +1,12 @@
 "use client";
 
 import { Ban, Clock, LogIn, Play, Plus, Power, ReceiptText, ShoppingBag, UserX, Wrench, X } from "lucide-react";
+import Link from "next/link";
 import { useState } from "react";
 import { deviceTypeMeta } from "@/components/lounge/device-type";
+import { useLiveBill } from "@/components/pos/use-live-bill";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,6 +15,7 @@ import { SheetDescription, SheetHeader, SheetTitle } from "@/components/ui/sheet
 import { useI18n } from "@/i18n/client";
 import { formatDuration, formatTime, money } from "@/i18n/format";
 import { quoteBooking } from "@/lib/booking/pricing";
+import { pricePlay } from "@/lib/booking/session-billing";
 import { diffMinutes } from "@/lib/booking/time";
 import { cn } from "@/lib/utils";
 import {
@@ -243,7 +246,7 @@ function WalkInSection({ device, now }: { device: PosDevice; now: Date }) {
 }
 
 function SessionSection({ session, device, now }: { session: PosSession; device: PosDevice; now: Date }) {
-  const { dict, locale, t } = useI18n();
+  const { dict, locale, t, href } = useI18n();
   const { data } = usePos();
   const { pending, run } = usePosAction();
   const [orderOpen, setOrderOpen] = useState(false);
@@ -253,8 +256,11 @@ function SessionSection({ session, device, now }: { session: PosSession; device:
   const category = data.categories.find((c) => c.id === device.categoryId)!;
 
   const end = new Date(session.scheduledEnd);
-  const remainingMs = end.getTime() - now.getTime();
-  const due = session.totalPrice - session.amountPaid;
+  const bill = useLiveBill(session, now)!;
+  // OPEN sessions count up; FIXED count down (frozen while paused).
+  const remainingMs = bill.remainingMs ?? 0;
+  const isOpen = session.mode === "OPEN";
+  const due = bill.due;
 
   const extend = (minutes: number) =>
     run(
@@ -282,17 +288,37 @@ function SessionSection({ session, device, now }: { session: PosSession; device:
       <div
         className={cn(
           "rounded-2xl p-4 text-center",
-          remainingMs < 0 ? "bg-rose-500/10 text-rose-700 dark:text-rose-300" : "bg-sky-500/10 text-sky-800 dark:text-sky-200",
+          bill.paused
+            ? "bg-violet-500/10 text-violet-800 dark:text-violet-200"
+            : !isOpen && remainingMs < 0
+              ? "bg-rose-500/10 text-rose-700 dark:text-rose-300"
+              : "bg-sky-500/10 text-sky-800 dark:text-sky-200",
         )}
       >
-        <div className="text-xs font-medium">{remainingMs < 0 ? dict.manage.session.overtime : dict.manage.session.remaining}</div>
+        <div className="text-xs font-medium">
+          {bill.paused
+            ? dict.pos.state.PAUSED
+            : isOpen
+              ? dict.pos.elapsed
+              : remainingMs < 0
+                ? dict.manage.session.overtime
+                : dict.manage.session.remaining}
+        </div>
         <div dir="ltr" className="font-mono text-3xl font-bold tabular-nums">
-          {formatCountdown(Math.abs(remainingMs))}
+          {formatCountdown(isOpen ? (bill.elapsedMs ?? 0) : Math.abs(remainingMs))}
         </div>
         <div className="text-xs opacity-80">
-          {formatTime(locale, session.actualStart ?? session.scheduledStart, tz)} → {formatTime(locale, session.scheduledEnd, tz)}
+          {dict.pos.mode[session.mode]} · {dict.pos.tier[session.priceTier]} ·{" "}
+          {formatTime(locale, session.actualStart ?? session.scheduledStart, tz)}
+          {!isOpen && ` → ${formatTime(locale, session.scheduledEnd, tz)}`}
         </div>
       </div>
+      <Link
+        href={href(`/pos/${data.lounge.id}`)}
+        className={buttonVariants({ variant: "link", size: "sm", className: "h-auto p-0" })}
+      >
+        {dict.pos.openInPos}
+      </Link>
 
       <div className="space-y-1">
         <Row label={dict.manage.session.guest}>{session.guestLabel ?? dict.manage.session.walkInGuest}</Row>
@@ -306,18 +332,9 @@ function SessionSection({ session, device, now }: { session: PosSession; device:
         {session.notes && <p className="rounded-lg bg-muted/50 p-2 text-sm">{session.notes}</p>}
       </div>
 
-      <div className="grid grid-cols-2 gap-2">
+      <div className={cn("grid grid-cols-2 gap-2", isOpen && "hidden")}>
         {EXTEND_OPTIONS.map((m) => {
-          const price = quoteBooking({
-            start: end,
-            durationMinutes: m,
-            timeZone: tz,
-            categoryId: category.id,
-            baseHourlyRate: category.baseHourlyRate,
-            rules: data.pricingRules,
-            taxRateBps: 0,
-            addOns: [],
-          }).playSubtotal;
+          const price = pricePlay({ timeZone: tz, rules: data.pricingRules }, category, session.priceTier, end, m);
           return (
             <Button key={m} variant="outline" onClick={() => extend(m)} disabled={pending} className="h-auto flex-col py-2">
               <span className="flex items-center gap-1 font-semibold">
@@ -364,11 +381,11 @@ function SessionSection({ session, device, now }: { session: PosSession; device:
       )}
 
       <div className="space-y-1 rounded-xl bg-muted/50 p-3">
-        <Row label={dict.booking.playTime}>{money(locale, session.playSubtotal, cur)}</Row>
-        {session.canteenSubtotal > 0 && <Row label={dict.booking.canteen}>{money(locale, session.canteenSubtotal, cur)}</Row>}
-        {session.taxTotal > 0 && <Row label={dict.booking.tax}>{money(locale, session.taxTotal, cur)}</Row>}
+        <Row label={dict.booking.playTime}>{money(locale, bill.play, cur)}</Row>
+        {bill.canteen > 0 && <Row label={dict.booking.canteen}>{money(locale, bill.canteen, cur)}</Row>}
+        {bill.tax > 0 && <Row label={dict.booking.tax}>{money(locale, bill.tax, cur)}</Row>}
         <Row label={dict.common.total} strong>
-          {money(locale, session.totalPrice, cur)}
+          {money(locale, bill.total, cur)}
         </Row>
         {session.amountPaid > 0 && <Row label={dict.manage.session.paid}>{money(locale, session.amountPaid, cur)}</Row>}
         <div className="flex items-center justify-between pt-1">

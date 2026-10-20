@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarCheck, LayoutDashboard, LogOut, ShieldCheck } from "lucide-react";
+import { CalendarCheck, LayoutDashboard, LogOut, MonitorSmartphone, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -45,9 +45,14 @@ export function UserMenu({ user }: { user: MenuUser }) {
           <CalendarCheck /> {dict.nav.myBookings}
         </DropdownMenuItem>
         {user.role !== "CUSTOMER" && (
-          <DropdownMenuItem render={<Link href={href("/manage")} />}>
-            <LayoutDashboard /> {dict.nav.dashboard}
-          </DropdownMenuItem>
+          <>
+            <DropdownMenuItem render={<Link href={href("/pos")} />}>
+              <MonitorSmartphone /> {dict.pos.title}
+            </DropdownMenuItem>
+            <DropdownMenuItem render={<Link href={href("/manage")} />}>
+              <LayoutDashboard /> {dict.nav.dashboard}
+            </DropdownMenuItem>
+          </>
         )}
         {user.role === "SUPER_ADMIN" && (
           <DropdownMenuItem render={<Link href={href("/admin")} />}>

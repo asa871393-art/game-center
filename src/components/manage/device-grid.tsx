@@ -4,7 +4,8 @@ import { deviceTypeMeta } from "@/components/lounge/device-type";
 import { useI18n } from "@/i18n/client";
 import { formatTime } from "@/i18n/format";
 import { cn } from "@/lib/utils";
-import type { PosDevice } from "@/server/queries/manage";
+import { useLiveBill } from "@/components/pos/use-live-bill";
+import type { PosDevice, PosSession } from "@/server/queries/manage";
 import { usePos } from "./pos-context";
 import { formatCountdown, posStatusBorder, posStatusTone } from "./pos-ui";
 
@@ -60,7 +61,8 @@ export function DeviceGrid({ now, onSelect, selectedId }: { now: Date; onSelect:
                 </span>
                 <TileStatus
                   device={device}
-                  remainingMs={current ? new Date(current.scheduledEnd).getTime() - now.getTime() : null}
+                  session={current ?? null}
+                  now={now}
                   nextLabel={next ? formatTime(locale, next.scheduledStart, data.lounge.timezone) : null}
                 />
               </button>
@@ -73,8 +75,29 @@ export function DeviceGrid({ now, onSelect, selectedId }: { now: Date; onSelect:
   );
 }
 
-function TileStatus({ device, remainingMs, nextLabel }: { device: PosDevice; remainingMs: number | null; nextLabel: string | null }) {
+function TileStatus({
+  device,
+  session,
+  now,
+  nextLabel,
+}: {
+  device: PosDevice;
+  session: PosSession | null;
+  now: Date;
+  nextLabel: string | null;
+}) {
   const { dict } = useI18n();
+  const bill = useLiveBill(session, now);
+  if (bill?.elapsedMs !== null && bill?.elapsedMs !== undefined) {
+    // Open session: count up.
+    return (
+      <span dir="ltr" className={cn("rounded px-1 font-mono text-[10px] tabular-nums", posStatusTone.IN_USE)}>
+        {bill.paused ? "❚❚ " : "↑ "}
+        {formatCountdown(bill.elapsedMs)}
+      </span>
+    );
+  }
+  const remainingMs = bill?.remainingMs ?? null;
   if (remainingMs !== null) {
     return (
       <span

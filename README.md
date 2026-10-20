@@ -83,6 +83,49 @@ The board updates live (see below), and after every action.
 - Access comes from `LoungeMember` in the database on every request (`src/server/staff.ts`), not from the JWT.
 - Each action writes an `AuditLog` row (`session.start`, `session.extend`, `session.end`, `canteen.order`, …).
 
+## Cashier POS terminal
+
+`/[locale]/pos/[loungeId]` is a full-screen, always-dark, touch-first screen for cashiers. It has no customer header
+or footer and works in Arabic (RTL) and English. Open it from the user menu (**Point of sale**), or go to `/pos` to pick
+a lounge.
+
+- **Device grid:** large tiles filtered by device type. Each tile shows its state (free, running, paused, overtime,
+  reserved, maintenance), the session type (**Open time** counts up, **Fixed time** counts down), the price tier and the
+  **current charge**, all live.
+- **Quick actions** (tap a tile):
+  - *Start session:* open or fixed time, price tier, players, guest name. Rates shown include time-of-day pricing.
+  - *Check in*, *no-show* or *cancel* the next booking.
+  - *Add items* from the canteen to the bill.
+  - *Change tier* (Single / Multi / VIP). Open sessions bill the new rate from now on; fixed sessions reprice the
+    remaining time.
+  - *Pause / resume:* the clock stops and the seat stays held. A fixed session's end moves out by the paused time, up
+    to the next booking or closing time.
+  - *Transfer* to another free device. Time already played stays at the old device's rate.
+  - *Extend* +30 min or +1 hr (fixed sessions).
+  - *Checkout:* an itemized bill (gaming segments, canteen, tax), then payment split freely across **Cash / Card /
+    ZainCash**, with cash given and change. Then print the receipt.
+- **Counter sale** and the **orders queue** are in the top bar.
+
+**Billing model** (`src/lib/booking/session-billing.ts`, shared by server and screen so the numbers always match):
+- Each session is made of `SessionSegment`s, one per stretch of play on a device at a tier. Pause, tier change,
+  transfer and checkout close the running segment.
+- **Open sessions** are billed per started minute: Σ segment(time-of-day rules × tier multiplier).
+- **Fixed sessions** keep the price snapshot from booking time, adjusted by extensions, tier changes and transfers.
+- Tiers come from `DeviceCategory.multiTierBps` / `vipTierBps` (null means not offered). The demo has PS5 at Multi 1.5×
+  and VIP 2×, and VIP rooms at Multi 1.5×.
+- Checkout freezes an open session's bill at the moment checkout opened (`billUntil`, at most 10 minutes old), so the
+  amount shown is the amount charged. Payments must add up exactly to the balance due.
+- An open session holds its seat until the next booking or closing time, so online customers can't book that device
+  meanwhile. At checkout the hold shrinks to the actual end.
+- **ZainCash at the counter** is recorded as `PaymentMethod.ZAINCASH`. It isn't connected to a ZainCash API; the cashier
+  confirms the transfer.
+
+**Thermal receipts:** `/[locale]/receipt/[id]` (a session's booking id or a counter sale's order id) is an 80mm layout
+(`@page { size: 80mm auto }`, 72mm printable). It is black on white, RTL in Arabic, and itemized with each payment
+method, cash given and change. While a session is still running it prints as a *provisional bill*. The POS prints it
+through a hidden iframe without leaving the screen; `?print=1` opens the print dialog on its own. Only staff of that
+lounge can open a receipt.
+
 ## Realtime (Phase 4)
 
 ```

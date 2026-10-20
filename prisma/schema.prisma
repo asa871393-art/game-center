@@ -93,6 +93,21 @@ enum BookingStatus {
   NO_SHOW
 }
 
+/// FIXED: a booked duration (prepaid or paid at the end). OPEN: the clock runs
+/// until checkout and play time is billed from SessionSegment rows.
+enum SessionMode {
+  FIXED
+  OPEN
+}
+
+/// Price tier of a session; MULTI/VIP multiply the hourly rate by the
+/// category's multiTierBps / vipTierBps.
+enum PriceTier {
+  SINGLE
+  MULTI
+  VIP
+}
+
 enum BookingSource {
   ONLINE
   WALK_IN
@@ -143,6 +158,8 @@ enum PaymentMethod {
   CARD
   WALLET
   ONLINE
+  /// ZainCash taken at the counter (merchant QR / transfer), not the online gateway.
+  ZAINCASH
 }
 
 enum TransactionStatus {
@@ -413,6 +430,10 @@ model DeviceCategory {
   minBookingMinutes   Int        @default(60)
   /// Booking start times snap to this grid (e.g. 30 = :00 / :30).
   slotIntervalMinutes Int        @default(30)
+  /// Rate multiplier for the MULTI tier (e.g. 15000 = 1.5x for 4 controllers); null = not offered.
+  multiTierBps        Int?
+  /// Rate multiplier for the VIP tier; null = not offered.
+  vipTierBps          Int?
   /// Free-form specs shown to customers: { gpu, cpu, monitorHz, games: [] ... }
   specs               Json?
   iconName            String? // lucide icon name
@@ -456,10 +477,11 @@ model Device {
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
 
-  lounge   Lounge         @relation(fields: [loungeId], references: [id], onDelete: Cascade)
-  category DeviceCategory @relation(fields: [categoryId], references: [id], onDelete: Restrict)
-  zone     FloorZone?     @relation(fields: [zoneId], references: [id], onDelete: SetNull)
+  lounge   Lounge           @relation(fields: [loungeId], references: [id], onDelete: Cascade)
+  category DeviceCategory   @relation(fields: [categoryId], references: [id], onDelete: Restrict)
+  zone     FloorZone?       @relation(fields: [zoneId], references: [id], onDelete: SetNull)
   bookings Booking[]
+  segments SessionSegment[]
 
   @@unique([loungeId, code])
   @@unique([loungeId, name])
@@ -512,16 +534,22 @@ model Booking {
   createdById String?
   source      BookingSource @default(ONLINE)
   status      BookingStatus @default(PENDING)
+  mode        SessionMode   @default(FIXED)
+  priceTier   PriceTier     @default(SINGLE)
 
   // Guest details for walk-ins without an account
   guestName  String?
   guestPhone String?
   players    Int     @default(1)
 
+  /// For OPEN sessions scheduledEnd is only a reservation horizon (next booking or closing time).
   scheduledStart DateTime
   scheduledEnd   DateTime
   actualStart    DateTime?
   actualEnd      DateTime?
+  /// Set while the session is paused; the seat stays reserved but the clock stops.
+  pausedAt       DateTime?
+  pausedMinutes  Int       @default(0)
 
   // Price snapshot (frozen at booking/extension time)
   currency        String         @db.Char(3)
@@ -550,6 +578,7 @@ model Booking {
   customer      User?              @relation("BookingCustomer", fields: [customerId], references: [id], onDelete: SetNull)
   createdBy     User?              @relation("BookingCreatedBy", fields: [createdById], references: [id], onDelete: SetNull)
   extensions    BookingExtension[]
+  segments      SessionSegment[]
   canteenOrders CanteenOrder[]
   transactions  Transaction[]
 
@@ -573,6 +602,29 @@ model BookingExtension {
   addedBy User?   @relation(fields: [addedById], references: [id], onDelete: SetNull)
 
   @@index([bookingId])
+}
+
+/// A stretch of play on one device at one tier. A new segment starts on
+/// check-in/start, resume, tier change and transfer; pausing or checkout ends it.
+/// OPEN sessions are billed as the sum of segment amounts.
+model SessionSegment {
+  id        String    @id @default(cuid())
+  bookingId String
+  deviceId  String
+  priceTier PriceTier
+  startedAt DateTime
+  /// null while the segment is running.
+  endedAt   DateTime?
+  /// Billable minutes and price, set when the segment ends.
+  minutes   Int?
+  amount    Decimal?  @db.Decimal(12, 2)
+  createdAt DateTime  @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  device  Device  @relation(fields: [deviceId], references: [id], onDelete: Restrict)
+
+  @@index([bookingId, startedAt])
+  @@index([deviceId])
 }
 
 // -----------------------------------------------------------------------------

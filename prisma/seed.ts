@@ -35,6 +35,9 @@ interface CategorySeed {
   rate: string;
   capacity?: number;
   minBookingMinutes?: number;
+  /** POS price tiers (basis points of the hourly rate); omitted = tier not offered. */
+  multiTierBps?: number;
+  vipTierBps?: number;
   iconName: string;
   specs: Prisma.InputJsonObject;
 }
@@ -54,6 +57,8 @@ const CATEGORIES: CategorySeed[] = [
     type: DeviceType.CONSOLE,
     rate: "4000",
     capacity: 4,
+    multiTierBps: 15000,
+    vipTierBps: 20000,
     iconName: "gamepad-2",
     specs: { screen: '65" 4K', games: ["EA FC 25", "Tekken 8", "GTA V"] },
   },
@@ -73,6 +78,7 @@ const CATEGORIES: CategorySeed[] = [
     rate: "15000",
     capacity: 8,
     minBookingMinutes: 120,
+    multiTierBps: 15000,
     iconName: "crown",
     specs: { screen: '85" 4K', consoles: ["PS5", "Xbox Series X"], seats: 8 },
   },
@@ -218,6 +224,8 @@ async function seedLounge(organizationId: string, seed: LoungeSeed, members: { u
         baseHourlyRate: c.rate,
         capacity: c.capacity ?? 1,
         minBookingMinutes: c.minBookingMinutes ?? 60,
+        multiTierBps: c.multiTierBps ?? null,
+        vipTierBps: c.vipTierBps ?? null,
         iconName: c.iconName,
         specs: c.specs,
       },

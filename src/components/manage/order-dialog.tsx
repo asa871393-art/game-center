@@ -1,7 +1,9 @@
 "use client";
 
-import { Banknote, CreditCard, Loader2 } from "lucide-react";
+import { Banknote, CreditCard, Loader2, Smartphone } from "lucide-react";
 import { useState } from "react";
+import { toast } from "sonner";
+import { printReceipt } from "@/components/pos/print";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -28,7 +30,7 @@ export function OrderDialog({ open, onOpenChange, session, deviceName }: OrderDi
   const { pending, run } = usePosAction();
   const [cart, setCart] = useState<Cart>({});
   const [notes, setNotes] = useState("");
-  const [method, setMethod] = useState<"CASH" | "CARD">("CASH");
+  const [method, setMethod] = useState<"CASH" | "CARD" | "ZAINCASH">("CASH");
   const cur = data.lounge.currency;
 
   const items = cartLines(cart);
@@ -55,10 +57,13 @@ export function OrderDialog({ open, onOpenChange, session, deviceName }: OrderDi
       );
     } else {
       run(
-        () => counterSaleAction({ ...common, method }),
+        () => counterSaleAction({ ...common, payments: [{ method, amount: total }] }),
         (res) => {
           close(false);
-          return t(dict.manage.canteen.sold, { amount: money(locale, res.total, cur) });
+          toast.success(t(dict.manage.canteen.sold, { amount: money(locale, res.total, cur) }), {
+            action: { label: dict.pos.printReceipt, onClick: () => printReceipt(locale, res.orderId) },
+            duration: 8_000,
+          });
         },
       );
     }
@@ -88,15 +93,18 @@ export function OrderDialog({ open, onOpenChange, session, deviceName }: OrderDi
           {!session && (
             <ToggleGroup
               value={[method]}
-              onValueChange={(v: string[]) => v[0] && setMethod(v[0] as "CASH" | "CARD")}
+              onValueChange={(v: string[]) => v[0] && setMethod(v[0] as "CASH" | "CARD" | "ZAINCASH")}
               variant="outline"
               className="w-full"
             >
-              <ToggleGroupItem value="CASH" className="flex-1">
+              <ToggleGroupItem value="CASH" className="h-11 flex-1">
                 <Banknote aria-hidden /> {dict.manage.checkout.CASH}
               </ToggleGroupItem>
-              <ToggleGroupItem value="CARD" className="flex-1">
+              <ToggleGroupItem value="CARD" className="h-11 flex-1">
                 <CreditCard aria-hidden /> {dict.manage.checkout.CARD}
+              </ToggleGroupItem>
+              <ToggleGroupItem value="ZAINCASH" className="h-11 flex-1">
+                <Smartphone aria-hidden /> {dict.pos.method.ZAINCASH}
               </ToggleGroupItem>
             </ToggleGroup>
           )}

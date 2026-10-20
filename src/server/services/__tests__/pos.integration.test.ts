@@ -2,28 +2,35 @@ import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays, addMinutes, toLocalIsoDate, zonedTimeToUtc } from "@/lib/booking/time";
 import { toMinor } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
+import type { PriceTier } from "@/generated/prisma/client";
+import { pricePlay } from "@/lib/booking/session-billing";
+import { getReceipt } from "@/server/queries/receipt";
 import { getLoungeAccess, hasLoungeRole } from "@/server/staff";
 import { createBooking } from "../booking";
 import {
   addSessionOrder,
   cancelBooking,
   cancelSessionOrder,
+  changeTier,
   checkIn,
   counterSale,
   endSession,
   extendSession,
   markNoShow,
   markOrderServed,
+  pauseSession,
   PosError,
+  resumeSession,
   setDeviceStatus,
   startWalkIn,
+  transferSession,
   type PosContext,
 } from "../pos";
 
 const SLUG = "nexus-downtown";
 const TZ = "Asia/Baghdad";
 const TEST_EMAIL = "pos-integration-test@gamelounge.dev";
-const TEST_DEVICES = ["PC02", "PC03", "PC04", "PC05"];
+const TEST_DEVICES = ["PC02", "PC03", "PC04", "PC05", "PC06", "PS5A", "PS5B"];
 
 let loungeId: string;
 let staffId: string;
@@ -188,12 +195,12 @@ describe("walk-in session lifecycle", () => {
     const b = await bookingOf(bookingId);
     const due = toMinor(b.totalPrice);
     await expectCode(
-      endSession(ctxAt(at(19, 30)), { bookingId, version: b.version, payment: { method: "CASH", amount: due - 1 } }),
+      endSession(ctxAt(at(19, 30)), { bookingId, version: b.version, payments: [{ method: "CASH", amount: due - 1 }] }),
       "PAYMENT_MISMATCH",
     );
-    await expectCode(endSession(ctxAt(at(19, 30)), { bookingId, version: b.version, payment: null }), "PAYMENT_MISMATCH");
+    await expectCode(endSession(ctxAt(at(19, 30)), { bookingId, version: b.version, payments: [] }), "PAYMENT_MISMATCH");
 
-    const res = await endSession(ctxAt(at(19, 30)), { bookingId, version: b.version, payment: { method: "CARD", amount: due } });
+    const res = await endSession(ctxAt(at(19, 30)), { bookingId, version: b.version, payments: [{ method: "CARD", amount: due }] });
     expect(res.collected).toBe(due);
     const done = await bookingOf(bookingId);
     expect(done).toMatchObject({ status: "COMPLETED", paymentStatus: "PAID" });
@@ -218,7 +225,7 @@ describe("reservations at the front desk", () => {
     await endSession(ctxAt(at(21)), {
       bookingId: b.id,
       version: active.version,
-      payment: { method: "CASH", amount: toMinor(active.totalPrice) },
+      payments: [{ method: "CASH", amount: toMinor(active.totalPrice) }],
     });
   });
 
@@ -243,7 +250,7 @@ describe("canteen counter", () => {
   it("records a paid counter sale and serves it once", async () => {
     const { orderId, total } = await counterSale(ctxAt(at(18)), {
       items: [{ menuItemId: redBullId, quantity: 1 }],
-      method: "CASH",
+      payments: [{ method: "CASH", amount: 2500 * 100 }],
     });
     expect(total).toBeGreaterThanOrEqual(2500 * 100);
     const tx = await prisma.transaction.findFirstOrThrow({ where: { canteenOrderId: orderId } });
@@ -264,12 +271,231 @@ describe("device status", () => {
     await endSession(ctxAt(addMinutes(at(22), 30)), {
       bookingId: s.id,
       version: b.version,
-      payment: { method: "CASH", amount: toMinor(b.totalPrice) },
+      payments: [{ method: "CASH", amount: toMinor(b.totalPrice) }],
     });
 
     await setDeviceStatus(ctxAt(at(23)), { deviceId: devices.PC03, status: "MAINTENANCE" });
     await expectCode(startWalkIn(ctxAt(at(23)), { deviceId: devices.PC03, durationMinutes: 30, players: 1 }), "DEVICE_UNAVAILABLE");
     await setDeviceStatus(ctxAt(at(23)), { deviceId: devices.PC03, status: "IDLE" });
     expect(await deviceStatusOf(devices.PC03)).toBe("IDLE");
+  });
+});
+
+/** Expected price of play on a device code, using the same pricing function the server uses. */
+async function priceOf(code: string, tier: PriceTier, start: Date, minutes: number) {
+  const device = await prisma.device.findUniqueOrThrow({ where: { id: devices[code] }, include: { category: true } });
+  const lounge = await prisma.lounge.findUniqueOrThrow({ where: { id: loungeId }, include: { pricingRules: { where: { isActive: true } } } });
+  const rules = lounge.pricingRules.map((r) => ({ ...r, hourlyRate: r.hourlyRate === null ? null : toMinor(r.hourlyRate) }));
+  const c = device.category;
+  return pricePlay(
+    { timeZone: TZ, rules },
+    { id: c.id, baseHourlyRate: toMinor(c.baseHourlyRate), multiTierBps: c.multiTierBps, vipTierBps: c.vipTierBps },
+    tier,
+    start,
+    minutes,
+  );
+}
+
+const segmentsOf = (bookingId: string) => prisma.sessionSegment.findMany({ where: { bookingId }, orderBy: { startedAt: "asc" } });
+
+describe("POS terminal: open sessions, tiers, pause, transfer, split payment", () => {
+  let bookingId: string;
+  let expectedPlay = 0;
+
+  it("only offers tiers the category has", async () => {
+    await expectCode(
+      startWalkIn(ctxAt(at(18)), { deviceId: devices.PC06, mode: "OPEN", priceTier: "MULTI", players: 1 }),
+      "TIER_UNAVAILABLE",
+    );
+  });
+
+  it("starts an open session that holds the seat until closing and bills nothing yet", async () => {
+    const res = await startWalkIn(ctxAt(at(18)), { deviceId: devices.PS5A, mode: "OPEN", priceTier: "MULTI", players: 3 });
+    bookingId = res.id;
+    const b = await bookingOf(bookingId);
+    expect(b).toMatchObject({ status: "ACTIVE", mode: "OPEN", priceTier: "MULTI" });
+    expect(toMinor(b.totalPrice)).toBe(0);
+    // Lounge closes 02:00; nothing else is booked on PS5-A that evening.
+    expect(b.scheduledEnd).toEqual(zonedTimeToUtc(addDays(day, 1), 2 * 60, TZ));
+    const segs = await segmentsOf(bookingId);
+    expect(segs).toHaveLength(1);
+    expect(segs[0]).toMatchObject({ deviceId: devices.PS5A, priceTier: "MULTI", endedAt: null });
+  });
+
+  it("can't extend an open session", async () => {
+    const b = await bookingOf(bookingId);
+    await expectCode(extendSession(ctxAt(at(18, 10)), { bookingId, version: b.version, minutes: 30 }), "INVALID_STATE");
+  });
+
+  it("pause closes and prices the running segment; resume starts a new one", async () => {
+    let b = await bookingOf(bookingId);
+    await pauseSession(ctxAt(at(18, 30)), { bookingId, version: b.version });
+    b = await bookingOf(bookingId);
+    expect(b.pausedAt).toEqual(at(18, 30));
+    await expectCode(pauseSession(ctxAt(at(18, 31)), { bookingId, version: b.version }), "INVALID_STATE");
+
+    let segs = await segmentsOf(bookingId);
+    const first = await priceOf("PS5A", "MULTI", at(18), 30);
+    expect(segs[0]).toMatchObject({ endedAt: at(18, 30), minutes: 30 });
+    expect(toMinor(segs[0].amount!)).toBe(first);
+    expectedPlay += first;
+    expect(await deviceStatusOf(devices.PS5A)).toBe("IN_USE");
+
+    await resumeSession(ctxAt(at(18, 40)), { bookingId, version: b.version });
+    b = await bookingOf(bookingId);
+    expect(b).toMatchObject({ pausedAt: null, pausedMinutes: 10 });
+    segs = await segmentsOf(bookingId);
+    expect(segs).toHaveLength(2);
+    expect(segs[1]).toMatchObject({ startedAt: at(18, 40), endedAt: null });
+  });
+
+  it("changing tier bills the time so far at the old tier", async () => {
+    const b = await bookingOf(bookingId);
+    await changeTier(ctxAt(at(19)), { bookingId, version: b.version, tier: "VIP" });
+    const segs = await segmentsOf(bookingId);
+    const second = await priceOf("PS5A", "MULTI", at(18, 40), 20);
+    expect(toMinor(segs[1].amount!)).toBe(second);
+    expectedPlay += second;
+    expect(segs[2]).toMatchObject({ priceTier: "VIP", endedAt: null });
+    expect((await bookingOf(bookingId)).priceTier).toBe("VIP");
+  });
+
+  it("transfers to another free device and frees the old one", async () => {
+    const b = await bookingOf(bookingId);
+    // Three players don't fit a one-seat PC.
+    await expectCode(
+      transferSession(ctxAt(at(19, 15)), { bookingId, version: b.version, targetDeviceId: devices.PC06 }),
+      "TOO_MANY_PLAYERS",
+    );
+    const res = await transferSession(ctxAt(at(19, 15)), { bookingId, version: b.version, targetDeviceId: devices.PS5B });
+    expect(res.deviceId).toBe(devices.PS5B);
+    const moved = await bookingOf(bookingId);
+    expect(moved.deviceId).toBe(devices.PS5B);
+    expect(moved.actualStart).toEqual(at(18));
+    expect(await deviceStatusOf(devices.PS5A)).toBe("IDLE");
+    expect(await deviceStatusOf(devices.PS5B)).toBe("IN_USE");
+    const segs = await segmentsOf(bookingId);
+    const third = await priceOf("PS5A", "VIP", at(19), 15);
+    expect(toMinor(segs[2].amount!)).toBe(third);
+    expectedPlay += third;
+    expect(segs[3]).toMatchObject({ deviceId: devices.PS5B, priceTier: "VIP", endedAt: null });
+  });
+
+  it("checks out up to the frozen bill time with a split payment and change", async () => {
+    const b = await bookingOf(bookingId);
+    const last = await priceOf("PS5B", "VIP", at(19, 15), 30);
+    expectedPlay += last;
+    const ctx = ctxAt(at(19, 47));
+    const billUntil = at(19, 45);
+
+    await expectCode(
+      endSession(ctx, { bookingId, version: b.version, billUntil, payments: [{ method: "CASH", amount: expectedPlay - 100 }] }),
+      "PAYMENT_MISMATCH",
+    );
+    // A bill frozen too long ago is refused rather than undercharging.
+    await expectCode(
+      endSession(ctx, { bookingId, version: b.version, billUntil: at(19, 30), payments: [{ method: "CASH", amount: expectedPlay }] }),
+      "PAYMENT_MISMATCH",
+    );
+
+    const cash = 1_000_000; // 10,000 IQD
+    const res = await endSession(ctx, {
+      bookingId,
+      version: b.version,
+      billUntil,
+      payments: [
+        { method: "CASH", amount: cash, tendered: 1_500_000 },
+        { method: "ZAINCASH", amount: expectedPlay - cash },
+      ],
+    });
+    expect(res.total).toBe(expectedPlay);
+
+    const done = await bookingOf(bookingId);
+    expect(done).toMatchObject({ status: "COMPLETED", paymentStatus: "PAID" });
+    expect(toMinor(done.playSubtotal)).toBe(expectedPlay);
+    expect(done.actualEnd).toEqual(billUntil);
+    // The open reservation ends when the guest leaves, so the seat is bookable again.
+    expect(done.scheduledEnd).toEqual(billUntil);
+    expect(await deviceStatusOf(devices.PS5B)).toBe("IDLE");
+
+    const txs = await prisma.transaction.findMany({ where: { bookingId }, orderBy: { method: "asc" } });
+    expect(txs.map((t) => t.method).sort()).toEqual(["CASH", "ZAINCASH"]);
+    expect(txs.find((t) => t.method === "CASH")!.metadata).toEqual({ tendered: 1_500_000, change: 500_000 });
+
+    const receipt = await getReceipt(bookingId);
+    expect(receipt).toMatchObject({ kind: "session", isFinal: true, total: expectedPlay, paid: expectedPlay, pausedMinutes: 10 });
+    expect(receipt!.play).toHaveLength(4);
+    expect(receipt!.play.reduce((s, l) => s + l.amount, 0)).toBe(expectedPlay);
+    expect(receipt!.payments.find((p) => p.method === "CASH")).toMatchObject({ tendered: 1_500_000, change: 500_000 });
+  });
+});
+
+describe("POS terminal: fixed sessions", () => {
+  it("reprices the remaining time on a tier change and pushes the end out after a pause", async () => {
+    const { id } = await startWalkIn(ctxAt(at(20)), { deviceId: devices.PS5A, mode: "FIXED", durationMinutes: 60, players: 2 });
+    let b = await bookingOf(id);
+    const base = toMinor(b.playSubtotal);
+    expect(base).toBe(await priceOf("PS5A", "SINGLE", at(20), 60));
+
+    await changeTier(ctxAt(at(20, 30)), { bookingId: id, version: b.version, tier: "MULTI" });
+    b = await bookingOf(id);
+    const delta = (await priceOf("PS5A", "MULTI", at(20, 30), 30)) - (await priceOf("PS5A", "SINGLE", at(20, 30), 30));
+    expect(delta).toBeGreaterThan(0);
+    expect(toMinor(b.playSubtotal)).toBe(base + delta);
+    expectConsistentTotals(b);
+
+    await pauseSession(ctxAt(at(20, 40)), { bookingId: id, version: b.version });
+    b = await bookingOf(id);
+    const { lostMinutes } = await resumeSession(ctxAt(at(20, 50)), { bookingId: id, version: b.version });
+    expect(lostMinutes).toBe(0);
+    b = await bookingOf(id);
+    expect(b.scheduledEnd).toEqual(at(21, 10));
+    // Pausing doesn't change what a fixed session costs.
+    expect(toMinor(b.playSubtotal)).toBe(base + delta);
+
+    await endSession(ctxAt(at(21, 10)), {
+      bookingId: id,
+      version: b.version,
+      payments: [{ method: "CARD", amount: toMinor(b.totalPrice) }],
+    });
+  });
+
+  it("caps a resumed fixed session at the next booking", async () => {
+    const { id } = await startWalkIn(ctxAt(at(21, 20)), { deviceId: devices.PS5B, mode: "FIXED", durationMinutes: 30, players: 1 });
+    await onlineBooking("PS5B", at(22));
+    let b = await bookingOf(id);
+    await pauseSession(ctxAt(at(21, 30)), { bookingId: id, version: b.version });
+    b = await bookingOf(id);
+    const res = await resumeSession(ctxAt(at(21, 50)), { bookingId: id, version: b.version });
+    // Wanted 21:50 + 20 = 22:10, but the next booking starts at 22:00.
+    expect(res.lostMinutes).toBe(10);
+    expect((await bookingOf(id)).scheduledEnd).toEqual(at(22));
+    b = await bookingOf(id);
+    await endSession(ctxAt(at(22)), {
+      bookingId: id,
+      version: b.version,
+      payments: [{ method: "CASH", amount: toMinor(b.totalPrice) }],
+    });
+  });
+});
+
+describe("counter sale receipt", () => {
+  it("splits payment and produces an itemized sales receipt", async () => {
+    const { orderId, total } = await counterSale(ctxAt(at(18)), {
+      items: [{ menuItemId: redBullId, quantity: 2 }],
+      payments: [
+        { method: "CARD", amount: 2500 * 100 },
+        { method: "CASH", amount: 2500 * 100, tendered: 5000 * 100 },
+      ],
+    });
+    expect(total).toBe(5000 * 100);
+    await expectCode(
+      counterSale(ctxAt(at(18)), { items: [{ menuItemId: redBullId, quantity: 1 }], payments: [{ method: "CARD", amount: 1 }] }),
+      "PAYMENT_MISMATCH",
+    );
+    const receipt = await getReceipt(orderId);
+    expect(receipt).toMatchObject({ kind: "order", total, paid: total });
+    expect(receipt!.items).toEqual([expect.objectContaining({ quantity: 2, amount: 5000 * 100 })]);
+    expect(receipt!.payments).toHaveLength(2);
   });
 });

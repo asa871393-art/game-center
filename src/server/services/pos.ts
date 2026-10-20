@@ -1,18 +1,27 @@
 import "server-only";
-import type { BookingStatus, Prisma } from "@/generated/prisma/client";
-import { PRICING_STEP_MINUTES, quoteBooking, type PricingRuleInput } from "@/lib/booking/pricing";
-import { findContainingWindow } from "@/lib/booking/schedule";
+import type { BookingStatus, PriceTier, Prisma } from "@/generated/prisma/client";
+import { PRICING_STEP_MINUTES, type PricingRuleInput } from "@/lib/booking/pricing";
+import { findContainingWindow, type Interval } from "@/lib/booking/schedule";
+import { billableMinutes, pricePlay, tierBps, type PlayPricing, type PricedCategory } from "@/lib/booking/session-billing";
 import { addMinutes, diffMinutes } from "@/lib/booking/time";
 import { computeBookingTotals, paymentStatusFor } from "@/lib/booking/totals";
 import { applyBps, fromMinor, toMinor, type Minor } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
+import { BLOCKING_STATUSES } from "@/server/queries/lounges";
 import { generateReference, isOverlapViolation, MAX_DURATION_MINUTES, releaseBookings } from "./booking";
 
 /**
- * Front-desk operations: walk-ins, check-in, extensions, canteen orders,
- * checkout and device status. Every booking mutation is guarded by
- * Booking.version so two tablets acting on the same seat can't both win.
+ * Front-desk operations: walk-ins (open or fixed time, price tiers), check-in,
+ * extensions, pause/resume, transfers, canteen orders, split-payment checkout
+ * and device status. Every booking mutation is guarded by Booking.version so
+ * two tablets acting on the same seat can't both win.
  * Callers must check lounge access first (see src/server/staff.ts).
+ *
+ * Billing:
+ * - FIXED sessions carry a price snapshot (playSubtotal) for the booked time;
+ *   extensions, tier changes and transfers adjust it by the difference.
+ * - OPEN sessions are billed from SessionSegment rows (time actually played,
+ *   per device and tier, pauses excluded) and settled at checkout.
  */
 
 export type PosErrorCode =
@@ -27,6 +36,7 @@ export type PosErrorCode =
   | "SLOT_TAKEN"
   | "ITEM_UNAVAILABLE"
   | "TOO_MANY_PLAYERS"
+  | "TIER_UNAVAILABLE"
   | "PAYMENT_MISMATCH"
   | "PAID_BOOKING";
 
@@ -49,9 +59,18 @@ export const CHECK_IN_EARLY_MINUTES = 30;
 export const NO_SHOW_GRACE_MINUTES = 15;
 export const WALK_IN_MIN_MINUTES = 15;
 export const EXTENSION_MAX_MINUTES = 4 * 60;
+/** How far back a checkout may freeze an open session's bill (the moment the cashier opened checkout). */
+export const BILL_UNTIL_MAX_AGE_MINUTES = 10;
 const MAX_ITEM_QUANTITY = 20;
 
-export type CounterPaymentMethod = "CASH" | "CARD";
+export type CounterPaymentMethod = "CASH" | "CARD" | "ZAINCASH";
+
+export interface PaymentPart {
+  method: CounterPaymentMethod;
+  amount: Minor;
+  /** Cash handed over, for the change line on the receipt. */
+  tendered?: Minor;
+}
 
 export interface OrderLineInput {
   menuItemId: string;
@@ -81,27 +100,24 @@ async function loadLounge(loungeId: string) {
     ...r,
     hourlyRate: r.hourlyRate === null ? null : toMinor(r.hourlyRate),
   }));
-  return { ...lounge, rules };
+  const pricing: PlayPricing = { timeZone: lounge.timezone, rules };
+  return { ...lounge, rules, pricing };
 }
 
 type LoungePricing = Awaited<ReturnType<typeof loadLounge>>;
 
-function quotePlay(
-  lounge: LoungePricing,
-  category: { id: string; baseHourlyRate: { toString(): string } },
-  start: Date,
-  minutes: number,
-) {
-  return quoteBooking({
-    start,
-    durationMinutes: minutes,
-    timeZone: lounge.timezone,
-    categoryId: category.id,
+function priced(category: {
+  id: string;
+  baseHourlyRate: { toString(): string };
+  multiTierBps: number | null;
+  vipTierBps: number | null;
+}): PricedCategory {
+  return {
+    id: category.id,
     baseHourlyRate: toMinor(category.baseHourlyRate),
-    rules: lounge.rules,
-    taxRateBps: lounge.taxRateBps,
-    addOns: [],
-  });
+    multiTierBps: category.multiTierBps,
+    vipTierBps: category.vipTierBps,
+  };
 }
 
 function audit(tx: Tx, ctx: PosContext, action: string, entityType: string, entityId: string, data?: Prisma.InputJsonValue) {
@@ -121,7 +137,7 @@ async function getBookingFor(tx: Tx, ctx: PosContext, bookingId: string, statuse
 }
 
 /** Applies `data` only if nobody changed the booking since it was read. */
-async function guardedUpdate(tx: Tx, booking: { id: string; version: number }, data: Prisma.BookingUpdateManyMutationInput) {
+async function guardedUpdate(tx: Tx, booking: { id: string; version: number }, data: Prisma.BookingUncheckedUpdateManyInput) {
   const res = await tx.booking.updateMany({
     where: { id: booking.id, version: booking.version },
     data: { ...data, version: { increment: 1 } },
@@ -140,11 +156,83 @@ function totalsData(totals: ReturnType<typeof computeBookingTotals>, amountPaid:
   };
 }
 
+function rebill(
+  booking: { canteenSubtotal: { toString(): string }; discountTotal: { toString(): string }; amountPaid: { toString(): string } },
+  playSubtotal: Minor,
+  taxRateBps: number,
+) {
+  const totals = computeBookingTotals({
+    playSubtotal: Math.max(0, playSubtotal),
+    canteenSubtotal: toMinor(booking.canteenSubtotal),
+    discountTotal: toMinor(booking.discountTotal),
+    taxRateBps,
+  });
+  return totalsData(totals, toMinor(booking.amountPaid));
+}
+
 async function assertDeviceFree(tx: Tx, deviceId: string, exceptBookingId?: string) {
   const active = await tx.booking.count({
     where: { deviceId, status: "ACTIVE", ...(exceptBookingId ? { id: { not: exceptBookingId } } : {}) },
   });
   if (active > 0) throw new PosError("DEVICE_BUSY");
+}
+
+function requireTier(category: PricedCategory, tier: PriceTier) {
+  if (tierBps(category, tier) === null) throw new PosError("TIER_UNAVAILABLE");
+}
+
+/**
+ * Latest end for a session on `deviceId` starting at `from`: the next live
+ * booking's start or the window's close, whichever is first.
+ */
+async function reservationHorizon(tx: Tx, deviceId: string, from: Date, window: Interval, exceptBookingId?: string, now = from) {
+  const next = await tx.booking.findFirst({
+    where: {
+      deviceId,
+      status: { in: [...BLOCKING_STATUSES] },
+      scheduledStart: { gte: from },
+      OR: [{ expiresAt: null }, { expiresAt: { gt: now } }],
+      ...(exceptBookingId ? { id: { not: exceptBookingId } } : {}),
+    },
+    orderBy: { scheduledStart: "asc" },
+    select: { scheduledStart: true },
+  });
+  return next && next.scheduledStart < window.end ? next.scheduledStart : window.end;
+}
+
+/** The opening window `at` falls in, given at least `minutes` of it remain. */
+function windowAt(lounge: LoungePricing, at: Date, minutes = 1) {
+  return findContainingWindow(at, addMinutes(at, minutes), lounge.openingHours, lounge.timezone);
+}
+
+async function openSegment(tx: Tx, bookingId: string, deviceId: string, priceTier: PriceTier, at: Date) {
+  await tx.sessionSegment.create({ data: { bookingId, deviceId, priceTier, startedAt: at } });
+}
+
+/**
+ * Ends the running segment at `until`. OPEN sessions get the segment priced
+ * (that is what they pay); FIXED segments are history only.
+ */
+async function closeSegment(tx: Tx, lounge: LoungePricing, bookingId: string, mode: "FIXED" | "OPEN", until: Date) {
+  const running = await tx.sessionSegment.findFirst({
+    where: { bookingId, endedAt: null },
+    include: { device: { include: { category: true } } },
+  });
+  if (!running) return 0;
+  const end = until < running.startedAt ? running.startedAt : until;
+  const minutes = billableMinutes(running.startedAt, end);
+  const amount =
+    mode === "OPEN" ? pricePlay(lounge.pricing, priced(running.device.category), running.priceTier, running.startedAt, minutes) : null;
+  await tx.sessionSegment.update({
+    where: { id: running.id },
+    data: { endedAt: end, minutes, amount: amount === null ? null : fromMinor(amount) },
+  });
+  return amount ?? 0;
+}
+
+async function openPlayTotal(tx: Tx, bookingId: string): Promise<Minor> {
+  const rows = await tx.sessionSegment.findMany({ where: { bookingId }, select: { amount: true } });
+  return rows.reduce((sum, r) => sum + (r.amount ? toMinor(r.amount) : 0), 0);
 }
 
 // -----------------------------------------------------------------------------
@@ -153,15 +241,20 @@ async function assertDeviceFree(tx: Tx, deviceId: string, exceptBookingId?: stri
 
 export interface StartWalkInInput {
   deviceId: string;
-  durationMinutes: number;
+  mode?: "FIXED" | "OPEN";
+  priceTier?: PriceTier;
+  /** Required for FIXED sessions. */
+  durationMinutes?: number;
   players: number;
   guestName?: string;
   guestPhone?: string;
 }
 
-/** Starts a walk-in session on an idle device, now. */
+/** Starts a walk-in session on an idle device, now: a fixed duration, or open until checkout. */
 export async function startWalkIn(ctx: PosContext, input: StartWalkInInput) {
   const now = floorToMinute(ctx.now ?? new Date());
+  const mode = input.mode ?? "FIXED";
+  const tier = input.priceTier ?? "SINGLE";
   const lounge = await loadLounge(ctx.loungeId);
   const device = await prisma.device.findFirst({
     where: { id: input.deviceId, loungeId: ctx.loungeId },
@@ -174,20 +267,29 @@ export async function startWalkIn(ctx: PosContext, input: StartWalkInInput) {
   if (!Number.isInteger(input.players) || input.players < 1 || input.players > device.category.capacity) {
     throw new PosError("TOO_MANY_PLAYERS");
   }
+  const category = priced(device.category);
+  requireTier(category, tier);
 
-  const minutes = input.durationMinutes;
-  if (
-    !Number.isInteger(minutes) ||
-    minutes < WALK_IN_MIN_MINUTES ||
-    minutes > MAX_DURATION_MINUTES ||
-    minutes % PRICING_STEP_MINUTES !== 0
-  ) {
-    throw new PosError("DURATION_INVALID");
+  let fixedEnd: Date | null = null;
+  let playSubtotal = 0;
+  if (mode === "FIXED") {
+    const minutes = input.durationMinutes ?? 0;
+    if (
+      !Number.isInteger(minutes) ||
+      minutes < WALK_IN_MIN_MINUTES ||
+      minutes > MAX_DURATION_MINUTES ||
+      minutes % PRICING_STEP_MINUTES !== 0
+    ) {
+      throw new PosError("DURATION_INVALID");
+    }
+    fixedEnd = addMinutes(now, minutes);
+    if (!findContainingWindow(now, fixedEnd, lounge.openingHours, lounge.timezone)) throw new PosError("OUTSIDE_HOURS");
+    playSubtotal = pricePlay(lounge.pricing, category, tier, now, minutes);
   }
-  const end = addMinutes(now, minutes);
-  if (!findContainingWindow(now, end, lounge.openingHours, lounge.timezone)) throw new PosError("OUTSIDE_HOURS");
+  const window = windowAt(lounge, now, WALK_IN_MIN_MINUTES);
+  if (!window) throw new PosError("OUTSIDE_HOURS");
 
-  const quote = quotePlay(lounge, device.category, now, minutes);
+  const totals = computeBookingTotals({ playSubtotal, canteenSubtotal: 0, discountTotal: 0, taxRateBps: lounge.taxRateBps });
   const reference = generateReference();
 
   try {
@@ -205,6 +307,10 @@ export async function startWalkIn(ctx: PosContext, input: StartWalkInInput) {
       // An overrunning session no longer overlaps by schedule but still occupies the seat.
       await assertDeviceFree(tx, device.id);
 
+      // An open session reserves the seat until the next booking or closing time.
+      const end = fixedEnd ?? (await reservationHorizon(tx, device.id, now, window));
+      if (diffMinutes(end, now) < WALK_IN_MIN_MINUTES) throw new PosError("SLOT_TAKEN");
+
       const booking = await tx.booking.create({
         data: {
           reference,
@@ -213,6 +319,8 @@ export async function startWalkIn(ctx: PosContext, input: StartWalkInInput) {
           createdById: ctx.actorId,
           source: "WALK_IN",
           status: "ACTIVE",
+          mode,
+          priceTier: tier,
           checkoutMethod: "PAY_AT_LOUNGE",
           guestName: input.guestName || null,
           guestPhone: input.guestPhone || null,
@@ -221,15 +329,16 @@ export async function startWalkIn(ctx: PosContext, input: StartWalkInInput) {
           scheduledEnd: end,
           actualStart: now,
           currency: lounge.currency,
-          hourlyRate: fromMinor(quote.effectiveHourlyRate),
-          playSubtotal: fromMinor(quote.playSubtotal),
-          taxTotal: fromMinor(quote.taxTotal),
-          totalPrice: fromMinor(quote.total),
+          hourlyRate: fromMinor(applyBps(category.baseHourlyRate, tierBps(category, tier)!)),
+          playSubtotal: fromMinor(totals.playSubtotal),
+          taxTotal: fromMinor(totals.taxTotal),
+          totalPrice: fromMinor(totals.totalPrice),
         },
         select: { id: true, reference: true },
       });
+      await openSegment(tx, booking.id, device.id, tier, now);
       await tx.device.update({ where: { id: device.id }, data: { status: "IN_USE" } });
-      await audit(tx, ctx, "session.start", "Booking", booking.id, { walkIn: true, minutes });
+      await audit(tx, ctx, "session.start", "Booking", booking.id, { walkIn: true, mode, tier, minutes: input.durationMinutes ?? null });
       return booking;
     });
   } catch (error) {
@@ -251,13 +360,14 @@ export async function checkIn(ctx: PosContext, input: { bookingId: string; versi
     await assertDeviceFree(tx, booking.deviceId, booking.id);
 
     await guardedUpdate(tx, booking, { status: "ACTIVE", actualStart: now });
+    await openSegment(tx, booking.id, booking.deviceId, booking.priceTier, now);
     await tx.device.update({ where: { id: booking.deviceId }, data: { status: "IN_USE" } });
     await audit(tx, ctx, "session.checkIn", "Booking", booking.id);
     return { reference: booking.reference };
   });
 }
 
-/** "Extend +N min": moves the scheduled end and bills the extra time at the rates in force then. */
+/** "Extend +N min" on a fixed session: moves the scheduled end and bills the extra time at the rates in force then. */
 export async function extendSession(ctx: PosContext, input: { bookingId: string; version: number; minutes: number }) {
   const { minutes } = input;
   if (!Number.isInteger(minutes) || minutes < PRICING_STEP_MINUTES || minutes > EXTENSION_MAX_MINUTES || minutes % PRICING_STEP_MINUTES !== 0) {
@@ -268,6 +378,8 @@ export async function extendSession(ctx: PosContext, input: { bookingId: string;
   try {
     return await prisma.$transaction(async (tx) => {
       const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
+      // Open sessions have no end to extend.
+      if (booking.mode !== "FIXED") throw new PosError("INVALID_STATE");
       const previousEnd = booking.scheduledEnd;
       const newEnd = addMinutes(previousEnd, minutes);
       const totalMinutes = diffMinutes(newEnd, booking.scheduledStart);
@@ -276,19 +388,12 @@ export async function extendSession(ctx: PosContext, input: { bookingId: string;
         throw new PosError("OUTSIDE_HOURS");
       }
 
-      const price = quotePlay(lounge, booking.device.category, previousEnd, minutes).playSubtotal;
+      const price = pricePlay(lounge.pricing, priced(booking.device.category), booking.priceTier, previousEnd, minutes);
       const playSubtotal = toMinor(booking.playSubtotal) + price;
-      const totals = computeBookingTotals({
-        playSubtotal,
-        canteenSubtotal: toMinor(booking.canteenSubtotal),
-        discountTotal: toMinor(booking.discountTotal),
-        taxRateBps: lounge.taxRateBps,
-      });
-
       await guardedUpdate(tx, booking, {
         scheduledEnd: newEnd,
         hourlyRate: fromMinor(Math.round((playSubtotal * 60) / totalMinutes)),
-        ...totalsData(totals, toMinor(booking.amountPaid)),
+        ...rebill(booking, playSubtotal, lounge.taxRateBps),
       });
       await tx.bookingExtension.create({
         data: { bookingId: booking.id, minutes, price: fromMinor(price), previousEnd, newEnd, addedById: ctx.actorId },
@@ -302,49 +407,252 @@ export async function extendSession(ctx: PosContext, input: { bookingId: string;
   }
 }
 
+/**
+ * Switches the price tier from now on. OPEN: a new segment starts at the new
+ * rate. FIXED: the remaining booked time is repriced (difference added or refunded to the bill).
+ */
+export async function changeTier(ctx: PosContext, input: { bookingId: string; version: number; tier: PriceTier }) {
+  const now = ctx.now ?? new Date();
+  const lounge = await loadLounge(ctx.loungeId);
+  return prisma.$transaction(async (tx) => {
+    const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
+    const category = priced(booking.device.category);
+    requireTier(category, input.tier);
+    if (booking.priceTier === input.tier) return { delta: 0 };
+
+    let playSubtotal = toMinor(booking.playSubtotal);
+    let delta = 0;
+    if (booking.mode === "FIXED") {
+      const from = booking.pausedAt ?? now;
+      const remaining = Math.max(0, diffMinutes(booking.scheduledEnd, from));
+      delta =
+        pricePlay(lounge.pricing, category, input.tier, now, remaining) -
+        pricePlay(lounge.pricing, category, booking.priceTier, now, remaining);
+      playSubtotal += delta;
+    }
+    if (!booking.pausedAt) {
+      await closeSegment(tx, lounge, booking.id, booking.mode, now);
+      await openSegment(tx, booking.id, booking.deviceId, input.tier, now);
+    }
+    await guardedUpdate(tx, booking, {
+      priceTier: input.tier,
+      hourlyRate: fromMinor(applyBps(category.baseHourlyRate, tierBps(category, input.tier)!)),
+      ...(booking.mode === "FIXED" ? rebill(booking, playSubtotal, lounge.taxRateBps) : {}),
+    });
+    await audit(tx, ctx, "session.tier", "Booking", booking.id, { from: booking.priceTier, to: input.tier, delta });
+    return { delta };
+  });
+}
+
+/** Stops the clock. The seat stays reserved for the guest. */
+export async function pauseSession(ctx: PosContext, input: { bookingId: string; version: number }) {
+  const now = ctx.now ?? new Date();
+  const lounge = await loadLounge(ctx.loungeId);
+  return prisma.$transaction(async (tx) => {
+    const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
+    if (booking.pausedAt) throw new PosError("INVALID_STATE");
+    await closeSegment(tx, lounge, booking.id, booking.mode, now);
+    await guardedUpdate(tx, booking, { pausedAt: now });
+    await audit(tx, ctx, "session.pause", "Booking", booking.id);
+  });
+}
+
+/**
+ * Restarts the clock. A FIXED session's end moves out by the paused time, as
+ * far as the next booking or closing time allows; `lostMinutes` reports any shortfall.
+ */
+export async function resumeSession(ctx: PosContext, input: { bookingId: string; version: number }) {
+  const now = ctx.now ?? new Date();
+  const lounge = await loadLounge(ctx.loungeId);
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
+      if (!booking.pausedAt) throw new PosError("INVALID_STATE");
+      const paused = billableMinutes(booking.pausedAt, now);
+
+      let scheduledEnd = booking.scheduledEnd;
+      let lostMinutes = 0;
+      if (booking.mode === "FIXED" && paused > 0) {
+        const wanted = addMinutes(booking.scheduledEnd, paused);
+        const window = findContainingWindow(booking.scheduledStart, booking.scheduledEnd, lounge.openingHours, lounge.timezone);
+        const limit = window
+          ? await reservationHorizon(tx, booking.deviceId, booking.scheduledEnd, window, booking.id, now)
+          : booking.scheduledEnd;
+        scheduledEnd = wanted < limit ? wanted : limit;
+        if (scheduledEnd < booking.scheduledEnd) scheduledEnd = booking.scheduledEnd;
+        lostMinutes = Math.max(0, diffMinutes(wanted, scheduledEnd));
+      }
+
+      await guardedUpdate(tx, booking, { pausedAt: null, pausedMinutes: booking.pausedMinutes + paused, scheduledEnd });
+      await openSegment(tx, booking.id, booking.deviceId, booking.priceTier, now);
+      await audit(tx, ctx, "session.resume", "Booking", booking.id, { paused, lostMinutes });
+      return { pausedMinutes: paused, lostMinutes, scheduledEnd };
+    });
+  } catch (error) {
+    if (isOverlapViolation(error)) throw new PosError("SLOT_TAKEN");
+    throw error;
+  }
+}
+
+/**
+ * Moves a running session to another free device (e.g. PC-03 -> PS5-B). Time
+ * played so far stays on the old device's rate; FIXED sessions have the
+ * remaining time repriced at the new device's rate.
+ */
+export async function transferSession(ctx: PosContext, input: { bookingId: string; version: number; targetDeviceId: string }) {
+  const now = ctx.now ?? new Date();
+  const start = floorToMinute(now);
+  const lounge = await loadLounge(ctx.loungeId);
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
+      if (booking.pausedAt) throw new PosError("INVALID_STATE");
+      if (booking.deviceId === input.targetDeviceId) throw new PosError("INVALID_STATE");
+
+      const target = await tx.device.findFirst({
+        where: { id: input.targetDeviceId, loungeId: ctx.loungeId },
+        include: { category: true },
+      });
+      if (!target) throw new PosError("NOT_FOUND");
+      if (!target.category.isActive || target.status === "MAINTENANCE" || target.status === "OFFLINE") {
+        throw new PosError("DEVICE_UNAVAILABLE");
+      }
+      if (booking.players > target.category.capacity) throw new PosError("TOO_MANY_PLAYERS");
+      const fromCategory = priced(booking.device.category);
+      const toCategory = priced(target.category);
+      requireTier(toCategory, booking.priceTier);
+      await assertDeviceFree(tx, target.id);
+
+      const window = windowAt(lounge, start);
+      if (!window) throw new PosError("OUTSIDE_HOURS");
+
+      let scheduledEnd: Date;
+      let playSubtotal = toMinor(booking.playSubtotal);
+      if (booking.mode === "FIXED") {
+        // The guest keeps the time they bought; an overrunning session gets a short grace slot.
+        scheduledEnd = booking.scheduledEnd > addMinutes(start, 1) ? booking.scheduledEnd : addMinutes(start, PRICING_STEP_MINUTES);
+        const remaining = Math.max(0, diffMinutes(booking.scheduledEnd, now));
+        playSubtotal +=
+          pricePlay(lounge.pricing, toCategory, booking.priceTier, now, remaining) -
+          pricePlay(lounge.pricing, fromCategory, booking.priceTier, now, remaining);
+      } else {
+        scheduledEnd = await reservationHorizon(tx, target.id, start, window, booking.id, now);
+        if (diffMinutes(scheduledEnd, start) < 1) throw new PosError("SLOT_TAKEN");
+      }
+
+      await closeSegment(tx, lounge, booking.id, booking.mode, now);
+      // The booking's range moves to the new device from now on; actualStart keeps the real start.
+      await guardedUpdate(tx, booking, {
+        deviceId: target.id,
+        scheduledStart: start,
+        scheduledEnd,
+        ...(booking.mode === "FIXED" ? rebill(booking, playSubtotal, lounge.taxRateBps) : {}),
+      });
+      await openSegment(tx, booking.id, target.id, booking.priceTier, now);
+      await tx.device.updateMany({ where: { id: booking.deviceId, status: "IN_USE" }, data: { status: "IDLE" } });
+      await tx.device.update({ where: { id: target.id }, data: { status: "IN_USE" } });
+      await audit(tx, ctx, "session.transfer", "Booking", booking.id, { from: booking.deviceId, to: target.id });
+      return { deviceId: target.id, deviceName: target.name };
+    });
+  } catch (error) {
+    if (isOverlapViolation(error)) throw new PosError("SLOT_TAKEN");
+    throw error;
+  }
+}
+
+function validatePayments(payments: readonly PaymentPart[], due: Minor) {
+  const sum = payments.reduce((s, p) => s + p.amount, 0);
+  const valid = payments.every(
+    (p) => Number.isInteger(p.amount) && p.amount > 0 && (p.tendered === undefined || (p.method === "CASH" && p.tendered >= p.amount)),
+  );
+  if (!valid || sum !== Math.max(0, due)) throw new PosError("PAYMENT_MISMATCH");
+}
+
+function paymentRows(payments: readonly PaymentPart[]) {
+  return payments.map((p) => ({
+    method: p.method,
+    status: "SUCCEEDED" as const,
+    amount: fromMinor(p.amount),
+    ...(p.tendered !== undefined ? { metadata: { tendered: p.tendered, change: p.tendered - p.amount } } : {}),
+  }));
+}
+
 export interface EndSessionInput {
   bookingId: string;
   version: number;
-  /** Required when a balance is due; must equal it exactly. */
-  payment?: { method: CounterPaymentMethod; amount: Minor } | null;
+  /** Must add up exactly to the balance due (empty when nothing is due). Split across methods freely. */
+  payments: PaymentPart[];
+  /**
+   * OPEN sessions: bill up to this instant (when checkout was opened), so the
+   * amount on the cashier's screen is the amount charged. Defaults to now.
+   */
+  billUntil?: Date;
 }
 
-/** Checkout: collects the balance, completes the booking and frees the device. */
+/** Checkout: settles the bill (split payments allowed), completes the booking and frees the device. */
 export async function endSession(ctx: PosContext, input: EndSessionInput) {
   const now = ctx.now ?? new Date();
-  return prisma.$transaction(async (tx) => {
-    const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
-    const total = toMinor(booking.totalPrice);
-    const due = total - toMinor(booking.amountPaid);
-    const amount = input.payment?.amount ?? 0;
-    if (due > 0 ? !input.payment || amount !== due : amount !== 0) throw new PosError("PAYMENT_MISMATCH");
+  const lounge = await loadLounge(ctx.loungeId);
+  try {
+    return await prisma.$transaction(async (tx) => {
+      const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
+      const started = booking.actualStart ?? booking.scheduledStart;
+      let until = now;
+      if (input.billUntil) {
+        if (input.billUntil > now || input.billUntil < addMinutes(now, -BILL_UNTIL_MAX_AGE_MINUTES)) {
+          throw new PosError("PAYMENT_MISMATCH");
+        }
+        until = input.billUntil < started ? started : input.billUntil;
+      }
 
-    await guardedUpdate(tx, booking, {
-      status: "COMPLETED",
-      actualEnd: now,
-      amountPaid: fromMinor(Math.max(total, toMinor(booking.amountPaid))),
-      paymentStatus: "PAID",
-    });
-    if (due > 0 && input.payment) {
-      await tx.transaction.create({
-        data: {
-          loungeId: ctx.loungeId,
-          bookingId: booking.id,
-          userId: booking.customerId,
-          processedById: ctx.actorId,
-          type: "PAYMENT",
-          method: input.payment.method,
-          status: "SUCCEEDED",
-          amount: fromMinor(due),
-          currency: booking.currency,
-        },
+      await closeSegment(tx, lounge, booking.id, booking.mode, until);
+      const billing =
+        booking.mode === "OPEN"
+          ? rebill(booking, await openPlayTotal(tx, booking.id), lounge.taxRateBps)
+          : rebill(booking, toMinor(booking.playSubtotal), lounge.taxRateBps);
+      const total = toMinor(billing.totalPrice);
+      const due = total - toMinor(booking.amountPaid);
+      validatePayments(input.payments, due);
+
+      const pausedExtra = booking.pausedAt ? billableMinutes(booking.pausedAt, until) : 0;
+      await guardedUpdate(tx, booking, {
+        ...billing,
+        status: "COMPLETED",
+        actualEnd: until,
+        pausedAt: null,
+        pausedMinutes: booking.pausedMinutes + pausedExtra,
+        amountPaid: fromMinor(Math.max(total, toMinor(booking.amountPaid))),
+        paymentStatus: "PAID",
+        // An open session's reservation ends when the guest leaves.
+        ...(booking.mode === "OPEN"
+          ? { scheduledEnd: until > booking.scheduledStart ? until : addMinutes(booking.scheduledStart, 1) }
+          : {}),
       });
-    }
-    // Leave MAINTENANCE/OFFLINE alone; only a seat we marked busy goes back to idle.
-    await tx.device.updateMany({ where: { id: booking.deviceId, status: "IN_USE" }, data: { status: "IDLE" } });
-    await audit(tx, ctx, "session.end", "Booking", booking.id, { collected: due, method: input.payment?.method ?? null });
-    return { reference: booking.reference, collected: due };
-  });
+      if (input.payments.length) {
+        await tx.transaction.createMany({
+          data: paymentRows(input.payments).map((row) => ({
+            ...row,
+            loungeId: ctx.loungeId,
+            bookingId: booking.id,
+            userId: booking.customerId,
+            processedById: ctx.actorId,
+            type: "PAYMENT" as const,
+            currency: booking.currency,
+          })),
+        });
+      }
+      // Leave MAINTENANCE/OFFLINE alone; only a seat we marked busy goes back to idle.
+      await tx.device.updateMany({ where: { id: booking.deviceId, status: "IN_USE" }, data: { status: "IDLE" } });
+      await audit(tx, ctx, "session.end", "Booking", booking.id, {
+        collected: Math.max(0, due),
+        methods: input.payments.map((p) => p.method),
+      });
+      return { reference: booking.reference, bookingId: booking.id, collected: Math.max(0, due), total };
+    });
+  } catch (error) {
+    if (isOverlapViolation(error)) throw new PosError("SLOT_TAKEN");
+    throw error;
+  }
 }
 
 /** Confirmed booking whose guest never came. Pre-orders are restocked; payments are kept. */
@@ -448,13 +756,14 @@ export async function addSessionOrder(ctx: PosContext, input: { bookingId: strin
   });
 }
 
-/** Walk-up counter sale with no seat, paid on the spot. */
-export async function counterSale(ctx: PosContext, input: { items: OrderLineInput[]; method: CounterPaymentMethod; notes?: string }) {
+/** Walk-up counter sale with no seat, paid on the spot (split payments allowed). */
+export async function counterSale(ctx: PosContext, input: { items: OrderLineInput[]; payments: PaymentPart[]; notes?: string }) {
   const lounge = await loadLounge(ctx.loungeId);
   return prisma.$transaction(async (tx) => {
     const { lines, subtotal } = await reserveLines(tx, ctx.loungeId, input.items);
     const tax = applyBps(subtotal, lounge.taxRateBps);
     const total = subtotal + tax;
+    validatePayments(input.payments, total);
     const order = await tx.canteenOrder.create({
       data: {
         loungeId: ctx.loungeId,
@@ -467,21 +776,19 @@ export async function counterSale(ctx: PosContext, input: { items: OrderLineInpu
       },
       select: { id: true },
     });
-    if (total > 0) {
-      await tx.transaction.create({
-        data: {
+    if (input.payments.length) {
+      await tx.transaction.createMany({
+        data: paymentRows(input.payments).map((row) => ({
+          ...row,
           loungeId: ctx.loungeId,
           canteenOrderId: order.id,
           processedById: ctx.actorId,
-          type: "PAYMENT",
-          method: input.method,
-          status: "SUCCEEDED",
-          amount: fromMinor(total),
+          type: "PAYMENT" as const,
           currency: lounge.currency,
-        },
+        })),
       });
     }
-    await audit(tx, ctx, "canteen.counterSale", "CanteenOrder", order.id, { total, method: input.method });
+    await audit(tx, ctx, "canteen.counterSale", "CanteenOrder", order.id, { total, methods: input.payments.map((p) => p.method) });
     return { orderId: order.id, total };
   });
 }
