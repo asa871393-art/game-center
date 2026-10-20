@@ -6,7 +6,6 @@ import { Suspense, useState } from "react";
 import { toast } from "sonner";
 import { DEVICE_TYPES, deviceTypeMeta } from "@/components/lounge/device-type";
 import { CanteenPanel } from "@/components/manage/canteen-panel";
-import { OrderDialog } from "@/components/manage/order-dialog";
 import { PosProvider, useAutoRefresh, useNow, usePos } from "@/components/manage/pos-context";
 import { LocaleSwitcher } from "@/components/site/locale-switcher";
 import { Badge } from "@/components/ui/badge";
@@ -18,8 +17,10 @@ import { useI18n } from "@/i18n/client";
 import { formatDate, money } from "@/i18n/format";
 import { cn } from "@/lib/utils";
 import type { PosBoardData } from "@/server/queries/manage";
+import { CounterPanel } from "./counter-panel";
 import { DeviceTile } from "./device-tile";
 import { QuickActions } from "./quick-actions";
+import { ShiftBar } from "./shift-controls";
 
 interface FeedEvent {
   table: string;
@@ -76,8 +77,8 @@ function Terminal({ cashierName }: { cashierName: string }) {
   const openSessions = data.sessions.filter((s) => s.status === "ACTIVE" && s.mode === "OPEN").length;
 
   return (
-    <div className="flex min-h-dvh flex-col">
-      <header className="sticky top-0 z-30 flex flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-2 backdrop-blur">
+    <div className="flex h-dvh flex-col">
+      <header className="z-30 flex flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-2 backdrop-blur">
         <div className="min-w-0">
           <div className="truncate text-lg font-bold">{data.lounge.name}</div>
           <div className="truncate text-xs text-muted-foreground">
@@ -88,8 +89,9 @@ function Terminal({ cashierName }: { cashierName: string }) {
           <span className={cn("size-2 rounded-full", liveDot[live])} aria-hidden />
           {dict.manage.connection[live]}
         </div>
+        <ShiftBar />
         <div className="ms-auto flex items-center gap-2">
-          <div className="hidden text-end sm:block">
+          <div className="hidden text-end xl:block">
             <div dir="ltr" className="font-mono text-2xl leading-none font-bold tabular-nums" suppressHydrationWarning>
               {new Intl.DateTimeFormat(intl, {
                 timeZone: tz,
@@ -107,7 +109,13 @@ function Terminal({ cashierName }: { cashierName: string }) {
             <span className="hidden md:inline">{dict.pos.ordersQueue}</span>
             {data.queue.length > 0 && <Badge>{data.queue.length}</Badge>}
           </Button>
-          <Button size="lg" className="h-12" onClick={() => setCounterOpen(true)}>
+          <Button
+            size="lg"
+            className="h-12"
+            variant={counterOpen ? "default" : "secondary"}
+            aria-pressed={counterOpen}
+            onClick={() => setCounterOpen((o) => !o)}
+          >
             <ShoppingCart aria-hidden />
             <span className="hidden md:inline">{dict.manage.canteen.counterSale}</span>
           </Button>
@@ -121,38 +129,61 @@ function Terminal({ cashierName }: { cashierName: string }) {
         </div>
       </header>
 
-      <div className="grid grid-cols-2 gap-2 px-4 pt-3 sm:grid-cols-4">
-        <Summary label={dict.manage.stats.occupancy} value={`${data.stats.activeSessions} / ${data.stats.inService}`} />
-        <Summary label={dict.pos.openSessions} value={String(openSessions)} />
-        <Summary label={dict.manage.stats.upcoming} value={String(data.stats.upcomingToday)} />
-        <Summary label={dict.manage.stats.revenue} value={money(locale, data.stats.revenue, data.lounge.currency)} />
+      <div className="flex min-h-0 flex-1">
+        <div className="min-w-0 flex-1 overflow-y-auto">
+          <div className="grid grid-cols-2 gap-2 px-4 pt-3 sm:grid-cols-4">
+            <Summary label={dict.manage.stats.occupancy} value={`${data.stats.activeSessions} / ${data.stats.inService}`} />
+            <Summary label={dict.pos.openSessions} value={String(openSessions)} />
+            <Summary label={dict.manage.stats.upcoming} value={String(data.stats.upcomingToday)} />
+            <Summary label={dict.manage.stats.revenue} value={money(locale, data.stats.revenue, data.lounge.currency)} />
+          </div>
+
+          <nav className="flex gap-2 overflow-x-auto px-4 py-3" aria-label={dict.search.deviceType}>
+            <FilterChip active={filter === "ALL"} onClick={() => setFilter("ALL")} label={dict.search.allTypes} count={data.devices.length} />
+            {typesPresent.map((type) => {
+              const { icon: Icon } = deviceTypeMeta[type];
+              return (
+                <FilterChip
+                  key={type}
+                  active={filter === type}
+                  onClick={() => setFilter(type)}
+                  label={dict.deviceType[type]}
+                  icon={<Icon className="size-4" aria-hidden />}
+                  count={data.devices.filter((d) => categories.get(d.categoryId)?.type === type).length}
+                />
+              );
+            })}
+          </nav>
+
+          <main
+            className={cn(
+              "grid auto-rows-min grid-cols-2 gap-3 px-4 pb-6 sm:grid-cols-3 lg:grid-cols-4",
+              counterOpen ? "xl:grid-cols-3 2xl:grid-cols-4" : "xl:grid-cols-5 2xl:grid-cols-6",
+            )}
+          >
+            {devices.map((d) => (
+              <DeviceTile key={d.id} device={d} now={now} onOpen={() => setSelectedId(d.id)} />
+            ))}
+          </main>
+        </div>
+
+        {/* Walk-in canteen sales: docked beside the grid on wide screens, overlaying it on tablets. */}
+        {counterOpen && (
+          <aside
+            aria-label={dict.manage.canteen.counterSale}
+            className="fixed inset-y-0 end-0 z-40 w-full max-w-md border-s bg-background shadow-2xl xl:static xl:z-auto xl:w-[26rem] xl:max-w-none xl:shadow-none"
+          >
+            <div className="flex justify-end p-1 xl:hidden">
+              <Button variant="ghost" size="sm" onClick={() => setCounterOpen(false)}>
+                {dict.common.close}
+              </Button>
+            </div>
+            <CounterPanel />
+          </aside>
+        )}
       </div>
 
-      <nav className="flex gap-2 overflow-x-auto px-4 py-3" aria-label={dict.search.deviceType}>
-        <FilterChip active={filter === "ALL"} onClick={() => setFilter("ALL")} label={dict.search.allTypes} count={data.devices.length} />
-        {typesPresent.map((type) => {
-          const { icon: Icon } = deviceTypeMeta[type];
-          return (
-            <FilterChip
-              key={type}
-              active={filter === type}
-              onClick={() => setFilter(type)}
-              label={dict.deviceType[type]}
-              icon={<Icon className="size-4" aria-hidden />}
-              count={data.devices.filter((d) => categories.get(d.categoryId)?.type === type).length}
-            />
-          );
-        })}
-      </nav>
-
-      <main className="grid flex-1 auto-rows-min grid-cols-2 gap-3 px-4 pb-6 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5 2xl:grid-cols-6">
-        {devices.map((d) => (
-          <DeviceTile key={d.id} device={d} now={now} onOpen={() => setSelectedId(d.id)} />
-        ))}
-      </main>
-
       <QuickActions device={selected} now={now} onClose={() => setSelectedId(null)} />
-      <OrderDialog open={counterOpen} onOpenChange={setCounterOpen} />
       <Sheet open={queueOpen} onOpenChange={setQueueOpen}>
         <SheetContent side={dir === "rtl" ? "left" : "right"} className="w-full overflow-y-auto sm:max-w-3xl">
           <SheetHeader>

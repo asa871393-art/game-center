@@ -5,7 +5,8 @@ import { getBusinessDay } from "@/lib/booking/schedule";
 import { addMinutes } from "@/lib/booking/time";
 import { toMinor } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
-import { CHECK_IN_EARLY_MINUTES, NO_SHOW_GRACE_MINUTES } from "@/server/services/pos";
+import { CHECK_IN_EARLY_MINUTES, getOpenShift, NO_SHOW_GRACE_MINUTES } from "@/server/services/pos";
+import { getShiftSummary } from "@/server/services/shift";
 
 /** A booking starting within this window shows its device as RESERVED. */
 export const RESERVED_LEAD_MINUTES = 30;
@@ -34,7 +35,8 @@ export async function getPosBoard(loungeId: string, now = new Date()) {
   const day = getBusinessDay(now, lounge.openingHours, lounge.timezone);
   const { start: dayStart, end: dayEnd } = day.range;
 
-  const [bookings, queue, payments, canteenSales] = await Promise.all([
+  const openShift = await getOpenShift(prisma, loungeId);
+  const [bookings, queue, payments, canteenSales, shift] = await Promise.all([
     prisma.booking.findMany({
       where: {
         loungeId,
@@ -75,6 +77,7 @@ export async function getPosBoard(loungeId: string, now = new Date()) {
       where: { loungeId, status: { not: "CANCELLED" }, createdAt: { gte: dayStart, lt: dayEnd } },
       _sum: { subtotal: true },
     }),
+    openShift ? getShiftSummary(openShift.id) : Promise.resolve(null),
   ]);
 
   // An unpaid online hold past its expiry no longer reserves anything.
@@ -179,6 +182,8 @@ export async function getPosBoard(loungeId: string, now = new Date()) {
       floorPlan: { width: lounge.floorPlanWidth, height: lounge.floorPlanHeight },
     },
     businessDay: { date: day.date, start: iso(dayStart), end: iso(dayEnd), isOpen: day.isOpen },
+    /** The lounge's open cashier shift (cash drawer), or null when none is open. */
+    shift,
     generatedAt: iso(now),
     zones: lounge.zones.map((z) => ({ id: z.id, name: z.name, color: z.color })),
     categories: lounge.categories.map((c) => ({

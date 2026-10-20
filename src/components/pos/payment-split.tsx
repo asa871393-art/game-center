@@ -1,6 +1,6 @@
 "use client";
 
-import { Banknote, CreditCard, Plus, Smartphone, X } from "lucide-react";
+import { Banknote, CreditCard, Plus, Smartphone, Wallet, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n/client";
@@ -8,7 +8,7 @@ import { money } from "@/i18n/format";
 import { toMinor, type Minor } from "@/lib/money";
 import { cn } from "@/lib/utils";
 
-export type PayMethod = "CASH" | "CARD" | "ZAINCASH";
+export type PayMethod = "CASH" | "CARD" | "ZAINCASH" | "FASTPAY";
 
 export interface PaymentRow {
   key: number;
@@ -22,9 +22,10 @@ export const payMethodMeta: Record<PayMethod, { icon: typeof Banknote }> = {
   CASH: { icon: Banknote },
   CARD: { icon: CreditCard },
   ZAINCASH: { icon: Smartphone },
+  FASTPAY: { icon: Wallet },
 };
 
-const METHODS: PayMethod[] = ["CASH", "CARD", "ZAINCASH"];
+const METHODS: PayMethod[] = ["CASH", "ZAINCASH", "FASTPAY", "CARD"];
 
 let lastRowKey = 0;
 /** Stable React keys for payment rows. */
@@ -73,12 +74,17 @@ export function PaymentSplit({
   const addRow = () =>
     onChange([
       ...rows,
-      { key: nextRowKey(), method: rows.some((r) => r.method === "CARD") ? "ZAINCASH" : "CARD", amount: Math.max(0, remaining), tendered: null },
+      {
+        key: nextRowKey(),
+        method: METHODS.find((m) => !rows.some((r) => r.method === m)) ?? "CARD",
+        amount: Math.max(0, remaining),
+        tendered: null,
+      },
     ]);
 
   return (
     <div className="space-y-3">
-      <div className="grid grid-cols-3 gap-2">
+      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         {METHODS.map((m) => {
           const Icon = payMethodMeta[m].icon;
           const active = rows.length === 1 && rows[0].method === m && rows[0].amount === due;

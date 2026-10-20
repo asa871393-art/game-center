@@ -120,6 +120,23 @@ a lounge.
 - **ZainCash at the counter** is recorded as `PaymentMethod.ZAINCASH`. It isn't connected to a ZainCash API; the cashier
   confirms the transfer.
 
+**Shifts and the cash drawer** (`src/server/services/shift.ts`):
+- A lounge has one drawer, so at most one **open shift** (enforced by a partial unique index). The top bar shows the
+  shift's cashier, start time and **live cash in drawer** (opening float + net cash taken).
+- Counter payments (Cash / ZainCash / FastPay / Card) need an open shift and are attached to it, so every payment
+  lands in a drawer that gets counted.
+- **Close shift:** the drawer is counted note by note (Iraqi dinar denominations) or entered as a total. It shows
+  expected vs counted cash and the variance (over / short), takings by payment method, sessions, counter sales,
+  gaming vs canteen, and discounts. The result prints as an 80mm **shift report** (`/[locale]/shift-report/[id]`) with
+  signature lines.
+
+**Discounts** are entered at checkout as an amount or a percentage (5–50% presets) and applied before tax. They're
+audited and show on the receipt and the shift report. A discount can't push the total below what was already paid
+online.
+
+**Walk-in canteen sales** use a side panel docked beside the device grid (it overlays the grid on tablets): tap items,
+split payment, print a receipt. The menu includes a **hookah** category.
+
 **Thermal receipts:** `/[locale]/receipt/[id]` (a session's booking id or a counter sale's order id) is an 80mm layout
 (`@page { size: 80mm auto }`, 72mm printable). It is black on white, RTL in Arabic, and itemized with each payment
 method, cash given and change. While a session is still running it prints as a *provisional bill*. The POS prints it

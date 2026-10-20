@@ -93,6 +93,9 @@ const MENU = [
   { name: "بوب كورن", category: MenuItemCategory.SNACK, price: "2000", sku: "SNK-POP", stockQuantity: null },
   { name: "برغر دجاج", category: MenuItemCategory.MEAL, price: "6000", sku: "MEAL-BURGER", stockQuantity: null },
   { name: "شريحة بيتزا", category: MenuItemCategory.MEAL, price: "3500", sku: "MEAL-PIZZA", stockQuantity: null },
+  { name: "أركيلة تفاحتين", category: MenuItemCategory.HOOKAH, price: "10000", sku: "HKH-2APPLE", stockQuantity: null },
+  { name: "أركيلة عنب ونعناع", category: MenuItemCategory.HOOKAH, price: "10000", sku: "HKH-GRAPEMINT", stockQuantity: null },
+  { name: "تبديل رأس أركيلة", category: MenuItemCategory.HOOKAH, price: "4000", sku: "HKH-REFILL", stockQuantity: null },
 ];
 
 interface LoungeSeed {

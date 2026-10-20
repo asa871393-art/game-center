@@ -38,6 +38,9 @@ export type PosErrorCode =
   | "TOO_MANY_PLAYERS"
   | "TIER_UNAVAILABLE"
   | "PAYMENT_MISMATCH"
+  | "DISCOUNT_INVALID"
+  | "SHIFT_CLOSED"
+  | "SHIFT_ALREADY_OPEN"
   | "PAID_BOOKING";
 
 export class PosError extends Error {
@@ -63,7 +66,7 @@ export const EXTENSION_MAX_MINUTES = 4 * 60;
 export const BILL_UNTIL_MAX_AGE_MINUTES = 10;
 const MAX_ITEM_QUANTITY = 20;
 
-export type CounterPaymentMethod = "CASH" | "CARD" | "ZAINCASH";
+export type CounterPaymentMethod = "CASH" | "CARD" | "ZAINCASH" | "FASTPAY";
 
 export interface PaymentPart {
   method: CounterPaymentMethod;
@@ -78,6 +81,19 @@ export interface OrderLineInput {
 }
 
 type Tx = Prisma.TransactionClient;
+
+/** The lounge's open cashier shift (its cash drawer), if any. */
+export function getOpenShift(db: Tx | typeof prisma, loungeId: string) {
+  return db.shift.findFirst({ where: { loungeId, status: "OPEN" } });
+}
+
+/** Counter payments need an open shift so every dinar lands in a drawer that gets counted. */
+async function requireShiftFor(tx: Tx, loungeId: string, payments: readonly PaymentPart[]) {
+  if (payments.length === 0) return null;
+  const shift = await getOpenShift(tx, loungeId);
+  if (!shift) throw new PosError("SHIFT_CLOSED");
+  return shift.id;
+}
 
 function floorToMinute(d: Date): Date {
   return new Date(Math.floor(d.getTime() / 60_000) * 60_000);
@@ -160,11 +176,12 @@ function rebill(
   booking: { canteenSubtotal: { toString(): string }; discountTotal: { toString(): string }; amountPaid: { toString(): string } },
   playSubtotal: Minor,
   taxRateBps: number,
+  discountTotal: Minor = toMinor(booking.discountTotal),
 ) {
   const totals = computeBookingTotals({
     playSubtotal: Math.max(0, playSubtotal),
     canteenSubtotal: toMinor(booking.canteenSubtotal),
-    discountTotal: toMinor(booking.discountTotal),
+    discountTotal,
     taxRateBps,
   });
   return totalsData(totals, toMinor(booking.amountPaid));
@@ -568,8 +585,9 @@ function validatePayments(payments: readonly PaymentPart[], due: Minor) {
   if (!valid || sum !== Math.max(0, due)) throw new PosError("PAYMENT_MISMATCH");
 }
 
-function paymentRows(payments: readonly PaymentPart[]) {
+function paymentRows(payments: readonly PaymentPart[], shiftId: string | null) {
   return payments.map((p) => ({
+    shiftId,
     method: p.method,
     status: "SUCCEEDED" as const,
     amount: fromMinor(p.amount),
@@ -587,6 +605,9 @@ export interface EndSessionInput {
    * amount on the cashier's screen is the amount charged. Defaults to now.
    */
   billUntil?: Date;
+  /** Discount on the whole bill (before tax), replacing any earlier discount. Omitted = keep. */
+  discount?: Minor;
+  discountReason?: string;
 }
 
 /** Checkout: settles the bill (split payments allowed), completes the booking and frees the device. */
@@ -606,13 +627,18 @@ export async function endSession(ctx: PosContext, input: EndSessionInput) {
       }
 
       await closeSegment(tx, lounge, booking.id, booking.mode, until);
-      const billing =
-        booking.mode === "OPEN"
-          ? rebill(booking, await openPlayTotal(tx, booking.id), lounge.taxRateBps)
-          : rebill(booking, toMinor(booking.playSubtotal), lounge.taxRateBps);
+      const play = booking.mode === "OPEN" ? await openPlayTotal(tx, booking.id) : toMinor(booking.playSubtotal);
+      const discount = input.discount ?? toMinor(booking.discountTotal);
+      if (!Number.isInteger(discount) || discount < 0 || discount > play + toMinor(booking.canteenSubtotal)) {
+        throw new PosError("DISCOUNT_INVALID");
+      }
+      const billing = rebill(booking, play, lounge.taxRateBps, discount);
       const total = toMinor(billing.totalPrice);
       const due = total - toMinor(booking.amountPaid);
+      // There's no refund flow at the counter, so a discount can't go below what's already paid.
+      if (input.discount !== undefined && due < 0) throw new PosError("DISCOUNT_INVALID");
       validatePayments(input.payments, due);
+      const shiftId = await requireShiftFor(tx, ctx.loungeId, input.payments);
 
       const pausedExtra = booking.pausedAt ? billableMinutes(booking.pausedAt, until) : 0;
       await guardedUpdate(tx, booking, {
@@ -630,7 +656,7 @@ export async function endSession(ctx: PosContext, input: EndSessionInput) {
       });
       if (input.payments.length) {
         await tx.transaction.createMany({
-          data: paymentRows(input.payments).map((row) => ({
+          data: paymentRows(input.payments, shiftId).map((row) => ({
             ...row,
             loungeId: ctx.loungeId,
             bookingId: booking.id,
@@ -646,6 +672,7 @@ export async function endSession(ctx: PosContext, input: EndSessionInput) {
       await audit(tx, ctx, "session.end", "Booking", booking.id, {
         collected: Math.max(0, due),
         methods: input.payments.map((p) => p.method),
+        ...(discount > 0 ? { discount, discountReason: input.discountReason ?? null } : {}),
       });
       return { reference: booking.reference, bookingId: booking.id, collected: Math.max(0, due), total };
     });
@@ -764,6 +791,7 @@ export async function counterSale(ctx: PosContext, input: { items: OrderLineInpu
     const tax = applyBps(subtotal, lounge.taxRateBps);
     const total = subtotal + tax;
     validatePayments(input.payments, total);
+    const shiftId = await requireShiftFor(tx, ctx.loungeId, input.payments);
     const order = await tx.canteenOrder.create({
       data: {
         loungeId: ctx.loungeId,
@@ -778,7 +806,7 @@ export async function counterSale(ctx: PosContext, input: { items: OrderLineInpu
     });
     if (input.payments.length) {
       await tx.transaction.createMany({
-        data: paymentRows(input.payments).map((row) => ({
+        data: paymentRows(input.payments, shiftId).map((row) => ({
           ...row,
           loungeId: ctx.loungeId,
           canteenOrderId: order.id,

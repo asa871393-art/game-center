@@ -11,6 +11,7 @@ import {
   LogIn,
   Minus,
   Pause,
+  Percent,
   Play,
   Plus,
   Power,
@@ -52,6 +53,7 @@ import {
   transferSessionAction,
 } from "@/server/actions/pos";
 import type { PosDevice, PosSession } from "@/server/queries/manage";
+import { discountAmount, DiscountEditor, type DiscountInput } from "./discount-editor";
 import { nextRowKey, PaymentSplit, paymentsBalance, type PaymentRow } from "./payment-split";
 import { printReceipt } from "./print";
 import { useBillContext, useLiveBill } from "./use-live-bill";
@@ -753,15 +755,31 @@ function CheckoutView({
   const tz = data.lounge.timezone;
   // The bill is frozen when checkout opens, so what the guest sees is what is charged.
   const [billUntil, setBillUntil] = useState(() => now);
-  const bill = liveBill(session, ctx, billUntil);
-  const [rows, setRows] = useState<PaymentRow[]>(() => [{ key: 1, method: "CASH", amount: bill.due, tendered: null }]);
+  const [discount, setDiscount] = useState<DiscountInput>({ kind: "amount", value: session.discountTotal });
+  const [discountOpen, setDiscountOpen] = useState(session.discountTotal > 0);
+  const billAt = (at: Date, d: DiscountInput) => {
+    const gross = liveBill({ ...session, discountTotal: 0 }, ctx, at);
+    const amount = discountAmount(d, gross.play + gross.canteen);
+    return { ...liveBill({ ...session, discountTotal: amount }, ctx, at), discount: amount };
+  };
+  const bill = billAt(billUntil, discount);
+  const [rows, setRows] = useState<PaymentRow[]>(() => [{ key: nextRowKey(), method: "CASH", amount: bill.due, tendered: null }]);
+  const overDiscounted = bill.total < session.amountPaid;
+  const needsShift = bill.due > 0 && !data.shift;
   const balanced = paymentsBalance(rows, bill.due) === 0 && rows.every((r) => r.amount > 0 || bill.due === 0);
 
+  // Any change to the bill resets the payment rows to "all cash" for the new amount.
+  const rebillTo = (at: Date, d: DiscountInput) => {
+    setRows([{ key: nextRowKey(), method: "CASH", amount: billAt(at, d).due, tendered: null }]);
+  };
   const recalc = () => {
     const at = new Date();
     setBillUntil(at);
-    const due = liveBill(session, ctx, at).due;
-    setRows([{ key: nextRowKey(), method: "CASH", amount: due, tendered: null }]);
+    rebillTo(at, discount);
+  };
+  const changeDiscount = (d: DiscountInput) => {
+    setDiscount(d);
+    rebillTo(billUntil, d);
   };
 
   const devices = new Map(data.devices.map((d) => [d.id, d.name]));
@@ -793,6 +811,7 @@ function CheckoutView({
           bookingId: session.id,
           version: session.version,
           billUntil: session.mode === "OPEN" ? billUntil.toISOString() : undefined,
+          discount: bill.discount,
           payments: bill.due > 0
             ? rows
                 .filter((r) => r.amount > 0)
@@ -837,6 +856,12 @@ function CheckoutView({
             <span className="tabular-nums">{money(locale, bill.canteen, cur)}</span>
           </div>
         )}
+        {bill.discount > 0 && (
+          <div className="flex justify-between gap-3 py-1 text-emerald-300">
+            <span>{dict.receipt.discount}</span>
+            <span className="tabular-nums">−{money(locale, bill.discount, cur)}</span>
+          </div>
+        )}
         {bill.tax > 0 && (
           <div className="flex justify-between gap-3 py-1 text-muted-foreground">
             <span>{dict.booking.tax}</span>
@@ -867,13 +892,31 @@ function CheckoutView({
         )}
       </div>
 
+      {discountOpen ? (
+        <DiscountEditor value={discount} onChange={changeDiscount} currency={cur} />
+      ) : (
+        <Button variant="ghost" size="sm" onClick={() => setDiscountOpen(true)}>
+          <Percent aria-hidden /> {dict.pos.addDiscount}
+        </Button>
+      )}
+      {overDiscounted && <p className="text-sm text-rose-300">{dict.manage.errors.DISCOUNT_INVALID}</p>}
+
       {bill.due > 0 ? (
         <PaymentSplit rows={rows} onChange={setRows} due={bill.due} currency={cur} />
       ) : (
         <p className="text-center text-sm text-muted-foreground">{dict.manage.checkout.nothingDue}</p>
       )}
 
-      <Button size="lg" className="h-14 w-full text-lg" onClick={confirm} disabled={pending || !balanced}>
+      {needsShift && (
+        <p className="rounded-xl border border-amber-400/50 bg-amber-500/10 p-3 text-sm text-amber-200">{dict.shift.requiredToPay}</p>
+      )}
+
+      <Button
+        size="lg"
+        className="h-14 w-full text-lg"
+        onClick={confirm}
+        disabled={pending || !balanced || overDiscounted || needsShift}
+      >
         {pending ? <Loader2 className="animate-spin" aria-hidden /> : <CheckCircle2 aria-hidden />}
         {bill.due > 0 ? dict.manage.checkout.confirm : dict.manage.checkout.confirmNoPay}
       </Button>

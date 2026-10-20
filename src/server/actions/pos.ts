@@ -26,6 +26,7 @@ import {
   type PosContext,
   type PosErrorCode,
 } from "@/server/services/pos";
+import { closeShift, openShift } from "@/server/services/shift";
 import { getLoungeAccess, hasLoungeRole } from "@/server/staff";
 
 export type PosActionResult<T = null> =
@@ -40,7 +41,7 @@ const tier = z.enum(["SINGLE", "MULTI", "VIP"]);
 const payments = z
   .array(
     z.object({
-      method: z.enum(["CASH", "CARD", "ZAINCASH"]),
+      method: z.enum(["CASH", "CARD", "ZAINCASH", "FASTPAY"]),
       amount: z.number().int().positive(),
       tendered: z.number().int().positive().optional(),
     }),
@@ -146,7 +147,12 @@ export async function transferSessionAction(payload: z.input<typeof transferSche
   return run(transferSchema, payload, "STAFF", (ctx, i) => transferSession(ctx, i));
 }
 
-const endSchema = versioned.extend({ payments, billUntil: z.iso.datetime().optional() });
+const endSchema = versioned.extend({
+  payments,
+  billUntil: z.iso.datetime().optional(),
+  discount: z.number().int().min(0).optional(),
+  discountReason: z.string().trim().max(120).optional(),
+});
 
 export async function endSessionAction(payload: z.input<typeof endSchema>) {
   return run(endSchema, payload, "STAFF", (ctx, i) =>
@@ -194,6 +200,25 @@ export async function cancelSessionOrderAction(payload: z.input<typeof orderSche
     await cancelSessionOrder(ctx, i);
     return null;
   });
+}
+
+const openShiftSchema = base.extend({ openingFloat: z.number().int().min(0) });
+
+export async function openShiftAction(payload: z.input<typeof openShiftSchema>) {
+  return run(openShiftSchema, payload, "STAFF", async (ctx, i) => {
+    const shift = await openShift(ctx, i);
+    return { shiftId: shift.id };
+  });
+}
+
+const closeShiftSchema = base.extend({
+  shiftId: id,
+  countedCash: z.number().int().min(0),
+  notes: z.string().trim().max(300).optional(),
+});
+
+export async function closeShiftAction(payload: z.input<typeof closeShiftSchema>) {
+  return run(closeShiftSchema, payload, "STAFF", (ctx, i) => closeShift(ctx, i));
 }
 
 const deviceStatusSchema = base.extend({ deviceId: id, status: z.enum(["IDLE", "MAINTENANCE", "OFFLINE"]) });

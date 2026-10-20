@@ -7,6 +7,7 @@ import { pricePlay } from "@/lib/booking/session-billing";
 import { getReceipt } from "@/server/queries/receipt";
 import { getLoungeAccess, hasLoungeRole } from "@/server/staff";
 import { createBooking } from "../booking";
+import { closeShift, getShiftSummary, openShift, shiftCashNet } from "../shift";
 import {
   addSessionOrder,
   cancelBooking,
@@ -78,9 +79,13 @@ async function cleanup() {
   await prisma.canteenOrder.deleteMany({ where: { OR: [{ bookingId: { in: bookingIds } }, { id: { in: orderIds } }] } });
   await prisma.booking.deleteMany({ where: { id: { in: bookingIds } } });
   await prisma.auditLog.deleteMany({ where: { loungeId: lounge.id, actorId: staff.id } });
+  await prisma.shift.deleteMany({ where: { loungeId: lounge.id } });
   await prisma.device.updateMany({ where: { loungeId: lounge.id, code: { in: TEST_DEVICES } }, data: { status: "IDLE" } });
   if (customer) await prisma.user.delete({ where: { id: customer.id } });
 }
+
+let shiftId: string;
+const OPENING_FLOAT = 5_000_000; // 50,000 IQD
 
 beforeAll(async () => {
   await cleanup();
@@ -94,6 +99,8 @@ beforeAll(async () => {
   staffId = (await prisma.user.findUniqueOrThrow({ where: { email: "staff@gamelounge.dev" } })).id;
   customerId = (await prisma.user.create({ data: { email: TEST_EMAIL, name: "POS Test Guest" } })).id;
   await prisma.menuItem.update({ where: { id: redBullId }, data: { stockQuantity: 10 } });
+  // Counter payments need an open shift (the cash drawer).
+  shiftId = (await openShift({ loungeId, actorId: staffId }, { openingFloat: OPENING_FLOAT })).id;
 });
 
 afterAll(async () => {
@@ -497,5 +504,79 @@ describe("counter sale receipt", () => {
     expect(receipt).toMatchObject({ kind: "order", total, paid: total });
     expect(receipt!.items).toEqual([expect.objectContaining({ quantity: 2, amount: 5000 * 100 })]);
     expect(receipt!.payments).toHaveLength(2);
+  });
+});
+
+describe("discounts and FastPay at checkout", () => {
+  it("applies a bill discount before tax and takes FastPay", async () => {
+    const { id } = await startWalkIn(ctxAt(at(23, 0)), { deviceId: devices.PC05, mode: "FIXED", durationMinutes: 60, players: 1 });
+    const b = await bookingOf(id);
+    const gross = toMinor(b.playSubtotal);
+    await expectCode(
+      endSession(ctxAt(at(23, 30)), { bookingId: id, version: b.version, discount: gross + 1, payments: [] }),
+      "DISCOUNT_INVALID",
+    );
+    const discount = Math.round(gross / 10);
+    const res = await endSession(ctxAt(at(23, 30)), {
+      bookingId: id,
+      version: b.version,
+      discount,
+      discountReason: "loyal guest",
+      payments: [{ method: "FASTPAY", amount: gross - discount }],
+    });
+    expect(res.total).toBe(gross - discount);
+    const done = await bookingOf(id);
+    expect(toMinor(done.discountTotal)).toBe(discount);
+    expectConsistentTotals(done);
+    const tx = await prisma.transaction.findFirstOrThrow({ where: { bookingId: id } });
+    expect(tx).toMatchObject({ method: "FASTPAY", shiftId });
+    expect((await getReceipt(id))!.discount).toBe(discount);
+  });
+});
+
+describe("cashier shift and cash drawer", () => {
+  it("allows only one open shift per lounge", async () => {
+    await expectCode(openShift({ loungeId, actorId: staffId }, { openingFloat: 0 }), "SHIFT_ALREADY_OPEN");
+  });
+
+  it("attaches every counter payment to the open shift and sums the drawer", async () => {
+    const untagged = await prisma.transaction.count({
+      where: { loungeId, processedById: staffId, status: "SUCCEEDED", shiftId: null, method: { not: "ONLINE" } },
+    });
+    expect(untagged).toBe(0);
+
+    const cashRows = await prisma.transaction.findMany({ where: { shiftId, method: "CASH", type: "PAYMENT", status: "SUCCEEDED" } });
+    const cash = cashRows.reduce((s, t) => s + toMinor(t.amount), 0);
+    expect(cash).toBeGreaterThan(0);
+    expect(await shiftCashNet(prisma, shiftId)).toBe(cash);
+
+    const summary = (await getShiftSummary(shiftId))!;
+    expect(summary).toMatchObject({ status: "OPEN", openingFloat: OPENING_FLOAT, cashNet: cash, expectedCash: OPENING_FLOAT + cash });
+    expect(summary.byMethod.map((m) => m.method).sort()).toEqual(["CARD", "CASH", "FASTPAY", "ZAINCASH"]);
+    expect(summary.totalCollected).toBe(summary.byMethod.reduce((s, m) => s + m.amount, 0));
+    expect(summary.sessions).toBeGreaterThan(0);
+    expect(summary.counterSales).toBeGreaterThan(0);
+    expect(summary.discounts).toBeGreaterThan(0);
+  });
+
+  it("closes with the counted cash and records the variance", async () => {
+    const before = (await getShiftSummary(shiftId))!;
+    const counted = before.expectedCash - 100_000; // 1,000 IQD short
+    const res = await closeShift(ctxAt(at(23, 59)), { shiftId, countedCash: counted, notes: "short by a note" });
+    expect(res).toMatchObject({ expected: before.expectedCash, counted, variance: -100_000 });
+
+    const after = (await getShiftSummary(shiftId))!;
+    expect(after).toMatchObject({ status: "CLOSED", countedCash: counted, variance: -100_000, notes: "short by a note" });
+    await expectCode(closeShift(ctxAt(at(23, 59)), { shiftId, countedCash: counted }), "SHIFT_CLOSED");
+  });
+
+  it("refuses to take payments with no open shift", async () => {
+    const stockBefore = await stockOf(redBullId);
+    await expectCode(
+      counterSale(ctxAt(at(18)), { items: [{ menuItemId: redBullId, quantity: 1 }], payments: [{ method: "CASH", amount: 2500 * 100 }] }),
+      "SHIFT_CLOSED",
+    );
+    // Nothing was sold: the stock decrement rolled back with the transaction.
+    expect(await stockOf(redBullId)).toBe(stockBefore);
   });
 });
