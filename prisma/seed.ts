@@ -369,7 +369,8 @@ async function main() {
   const superAdmin = await upsertUser("admin@gamelounge.dev", "Platform Admin", Role.SUPER_ADMIN, passwordHash);
   const owner = await upsertUser("owner@gamelounge.dev", "Lounge Owner", Role.LOUNGE_ADMIN, passwordHash);
   const staff = await upsertUser("staff@gamelounge.dev", "Front Desk", Role.STAFF, passwordHash);
-  const customer = await upsertUser("player@gamelounge.dev", "Demo Player", Role.CUSTOMER, passwordHash);
+  // Super admin too, so one login can book as a player and manage every lounge (POS, devices, menu).
+  const customer = await upsertUser("player@gamelounge.dev", "Demo Player", Role.SUPER_ADMIN, passwordHash);
 
   await prisma.wallet.upsert({
     where: { userId: customer.id },

@@ -2,12 +2,13 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { MenuAdmin } from "@/components/menu/menu-admin";
+import { ManagersOnly } from "@/components/pos/managers-only";
 import { Skeleton } from "@/components/ui/skeleton";
 import { localePath } from "@/i18n/config";
 import { getDictionary, getLocale } from "@/i18n/server";
 import { getMenuAdmin } from "@/server/queries/menu";
 import { getSession } from "@/server/session";
-import { getLoungeAccess, hasLoungeRole } from "@/server/staff";
+import { getLoungeAccess, hasLoungeRole, loungeExists } from "@/server/staff";
 
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDictionary();
@@ -29,9 +30,13 @@ async function Menu({ loungeId }: { loungeId: string }) {
   if (!session?.user?.id) {
     redirect(`${localePath(locale, "/login")}?callbackUrl=${encodeURIComponent(localePath(locale, `/pos/${loungeId}/menu`))}`);
   }
-  // Managers and owners only; same 404 for "no access" and "no such lounge".
+  // Managers and owners only. Anyone else signed in is told why and offered a switch of
+  // account (lounges are public on the booking site, so this reveals nothing new).
   const access = await getLoungeAccess(session.user.id, loungeId);
-  if (!access || !hasLoungeRole(access, "MANAGER")) notFound();
+  if (!access || !hasLoungeRole(access, "MANAGER")) {
+    if (!(await loungeExists(loungeId))) notFound();
+    return <ManagersOnly locale={locale} loungeId={loungeId} email={session.user.email ?? ""} path={`/pos/${loungeId}/menu`} />;
+  }
   const data = await getMenuAdmin(loungeId);
   if (!data) notFound();
   return <MenuAdmin data={data} />;

@@ -37,6 +37,10 @@ export async function getLoungeAccess(userId: string, loungeId: string): Promise
   return membership ? { loungeId, role: membership.role } : null;
 }
 
+export async function loungeExists(loungeId: string): Promise<boolean> {
+  return (await prisma.lounge.count({ where: { id: loungeId } })) > 0;
+}
+
 /** Lounges the user can open in the dashboard. */
 export async function listManagedLounges(userId: string, platformRole: Role) {
   const lounges = await prisma.lounge.findMany({

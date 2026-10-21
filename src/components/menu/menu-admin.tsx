@@ -237,7 +237,7 @@ function ItemRow({
 
   return (
     <li className={cn("flex gap-3 rounded-2xl border bg-card p-3", !item.isAvailable && "opacity-70")}>
-      <MenuThumb imageUrl={item.imageUrl} iconName={item.iconName} kind={item.kind} className="size-14" />
+      <MenuThumb imageUrl={item.imageUrl} iconName={item.iconName} kind={item.kind} className="size-16 rounded-xl" iconClassName="size-7" />
       <div className="min-w-0 flex-1 space-y-1">
         <div className="flex items-start justify-between gap-2">
           <div className="min-w-0">

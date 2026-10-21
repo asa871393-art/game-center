@@ -1,6 +1,6 @@
 "use client";
 
-import { Check, Infinity as InfinityIcon, Loader2, Plus, Save } from "lucide-react";
+import { Check, Infinity as InfinityIcon, Loader2, Plus, Save, X } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
 import { MENU_ICON_NAMES, MENU_ICONS, MenuThumb } from "@/components/canteen/menu-icons";
@@ -118,6 +118,12 @@ function ItemForm({
   const cur = data.lounge.currency;
   const categories = [...data.categories, ...extraCategories.filter((c) => !data.categories.some((d) => d.id === c.id))];
   const category = categories.find((c) => c.id === form.menuCategoryId);
+  const imageUrl = form.imageUrl.trim();
+  // Matches the server rule; a broken link is only a warning (the POS falls back to the icon).
+  const imageInvalid = imageUrl !== "" && !/^https?:\/\/\S+$/i.test(imageUrl);
+  const imageOk = imageUrl !== "" && !imageInvalid;
+  const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
+  const imageBroken = imageOk && brokenUrl === imageUrl;
   const margin =
     form.price !== null && form.costPrice !== null && form.price > 0 ? Math.round(((form.price - form.costPrice) / form.price) * 100) : null;
 
@@ -150,7 +156,7 @@ function ItemForm({
       costPrice: form.costPrice,
       stockQuantity: form.unlimited ? null : Math.max(0, Math.floor(Number(form.stock) || 0)),
       lowStockAt: Math.max(0, Math.floor(Number(form.lowStockAt) || 0)),
-      imageUrl: form.imageUrl || null,
+      imageUrl: imageUrl || null,
       iconName: form.iconName,
       sku: form.sku || null,
       isAvailable: form.isAvailable,
@@ -343,16 +349,46 @@ function ItemForm({
               );
             })}
           </div>
-          <div className="flex items-center gap-2">
-            <MenuThumb imageUrl={form.imageUrl || null} iconName={form.iconName} kind={category?.kind ?? "OTHER"} className="size-11" />
-            <Input
-              dir="ltr"
-              className="h-11 flex-1"
-              placeholder={`${m.imageUrl} (${dict.common.optional}) https://…`}
-              value={form.imageUrl}
-              maxLength={500}
-              onChange={(e) => set("imageUrl", e.target.value)}
+        </section>
+
+        <section className="space-y-2">
+          <Label htmlFor="mi-image">
+            {m.image} <span className="font-normal text-muted-foreground">({dict.common.optional})</span>
+          </Label>
+          <div className="flex gap-3">
+            {/* Live preview, the same square the POS cards use. */}
+            <MenuThumb
+              imageUrl={imageOk ? imageUrl : null}
+              iconName={form.iconName}
+              kind={category?.kind ?? "OTHER"}
+              onBroken={() => setBrokenUrl(imageUrl)}
+              className="size-28 rounded-2xl border"
+              iconClassName="size-12"
             />
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <div className="flex gap-2">
+                <Input
+                  id="mi-image"
+                  dir="ltr"
+                  type="url"
+                  inputMode="url"
+                  className="h-11 flex-1"
+                  placeholder="https://…/image.jpg"
+                  value={form.imageUrl}
+                  maxLength={500}
+                  aria-invalid={imageInvalid || imageBroken}
+                  onChange={(e) => set("imageUrl", e.target.value)}
+                />
+                {form.imageUrl && (
+                  <Button variant="outline" size="icon" className="size-11" onClick={() => set("imageUrl", "")} aria-label={m.removeImage}>
+                    <X />
+                  </Button>
+                )}
+              </div>
+              <p className={cn("text-xs", imageInvalid || imageBroken ? "text-destructive" : "text-muted-foreground")}>
+                {imageInvalid ? m.imageInvalid : imageBroken ? m.imageBroken : m.imageHint}
+              </p>
+            </div>
           </div>
         </section>
 
@@ -392,7 +428,7 @@ function ItemForm({
           size="lg"
           className="h-12 text-base"
           onClick={submit}
-          disabled={pending || !form.name.trim() || form.price === null || !form.menuCategoryId || !!newCategory}
+          disabled={pending || !form.name.trim() || form.price === null || !form.menuCategoryId || !!newCategory || imageInvalid}
         >
           {pending ? <Loader2 className="animate-spin" aria-hidden /> : <Save aria-hidden />}
           {item ? m.save : m.add}

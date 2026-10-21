@@ -19,6 +19,7 @@ npm run dev                   # http://localhost:3000 → redirects to /ar
 ```
 
 Demo logins (password `Password123!`): `admin@`, `owner@`, `staff@`, `player@gamelounge.dev`.
+`player@` is also a super admin, so it can manage every lounge's POS, devices and menu.
 
 ## Scripts
 

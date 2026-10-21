@@ -99,5 +99,5 @@ export async function signInWithGoogle(formData: FormData): Promise<void> {
 
 export async function signOutAction(formData: FormData): Promise<void> {
   const locale = String(formData.get("locale") ?? "ar");
-  await signOut({ redirectTo: localePath(isLocale(locale) ? locale : "ar") });
+  await signOut({ redirectTo: safeRedirect(formData.get("redirectTo"), locale) });
 }
