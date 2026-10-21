@@ -1,4 +1,5 @@
 import "server-only";
+import { isFirebaseStorageEnabled } from "@/lib/env";
 import { toMinor } from "@/lib/money";
 import { prisma } from "@/lib/prisma";
 
@@ -42,6 +43,8 @@ export async function getMenuAdmin(loungeId: string, now = new Date()) {
   return {
     lounge: { id: lounge.id, name: lounge.name, currency: lounge.currency },
     salesWindowDays: SALES_WINDOW_DAYS,
+    /** Firebase Storage is configured, so the item form can offer "upload image". */
+    imageUploads: isFirebaseStorageEnabled,
     categories: lounge.menuCategories.map((c) => ({
       id: c.id,
       name: c.name,

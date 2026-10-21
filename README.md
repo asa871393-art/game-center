@@ -123,13 +123,21 @@ a lounge.
 
 **Shifts and the cash drawer** (`src/server/services/shift.ts`):
 - A lounge has one drawer, so at most one **open shift** (enforced by a partial unique index). The top bar shows the
-  shift's cashier, start time and **live cash in drawer** (opening float + net cash taken).
+  shift's cashier, start time and **live cash in drawer**.
 - Counter payments (Cash / ZainCash / FastPay / Card) need an open shift and are attached to it, so every payment
   lands in a drawer that gets counted.
-- **Close shift:** the drawer is counted note by note (Iraqi dinar denominations) or entered as a total. It shows
-  expected vs counted cash and the variance (over / short), takings by payment method, sessions, counter sales,
-  gaming vs canteen, and discounts. The result prints as an 80mm **shift report** (`/[locale]/shift-report/[id]`) with
-  signature lines.
+- **Cash expenses** ("مصروف" in the top bar): cash paid out of the drawer (ice, delivery, repairs) with a reason.
+  Stored in `ShiftExpense`; can't exceed the cash in the drawer; mistakes are voided (kept on record), and only while
+  the shift is open. Adding/voiding expenses and closing lock the shift row, so they can't race each other.
+- **Expected cash** = opening float + cash from gaming + cash from canteen − cash expenses. Cash is split by purpose:
+  counter sales are canteen; a session payment is shared in proportion to the session's play and canteen subtotals.
+- **Close shift:** the drawer is counted note by note (Iraqi dinar denominations) or entered as a total. It shows the
+  expected-cash breakdown, counted cash and the variance (over / short), takings by payment method (Cash / ZainCash /
+  FastPay / Card), sessions, counter sales, gaming vs canteen revenue, and discounts. The result prints as an 80mm
+  **Z-report** (`/[locale]/shift-report/[id]`) with signature lines.
+- **Shift history** (`/[locale]/pos/[loungeId]/shifts`, managers and owners): the last 60 shifts with cashier, times,
+  takings, expenses, expected vs counted cash and variance, plus totals of short/over shifts; each row reprints its
+  Z-report.
 
 **Discounts** are entered at checkout as an amount or a percentage (5–50% presets) and applied before tax. They're
 audited and show on the receipt and the shift report. A discount can't push the total below what was already paid
@@ -250,12 +258,56 @@ Settlement is idempotent: only the first result for a pending transaction counts
 hosted URL, and verify the signed callback in a route handler before calling `settlePayment()`. Return it from
 `getPaymentProvider()`. Set `PAYMENTS_MODE=disabled` to offer pay-at-lounge only.
 
+## Firebase (optional)
+
+Everything Firebase is optional: with the `.env` values empty the app runs as before.
+
+| File | Side | What it gives you |
+| --- | --- | --- |
+| `src/lib/firebase.ts` | client | `getFirebaseApp()`, `getFirebaseAuth()`, `getDb()` (Firestore), `getFirebaseStorage()`; lazy, reuses the app across hot reloads |
+| `src/lib/firebase-admin.ts` | server only | `getAdminApp()`, `getAdminAuth()`, `getAdminDb()`, `getAdminStorage()` from the service account |
+| `src/lib/firebase-storage.ts` | server only | `uploadProductImage(file, folderName): Promise<string>` |
+
+Setup: in the Firebase console, add a Web app and copy its config into the `NEXT_PUBLIC_FIREBASE_*` values; enable
+Storage (that gives the bucket name); under Project settings → Service accounts, generate a private key and copy its
+`client_email` and `private_key` into `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` (one line, `\n` escapes, in
+double quotes). Restart `npm run dev`.
+
+**Menu photos.** With the Admin values and bucket set, the menu item form gets an "رفع صورة" (Upload image) button.
+The file goes to a manager-only Server Action, is checked by content (JPEG/PNG/WebP/GIF, no SVG) and size (5 MB;
+`serverActions.bodySizeLimit` is 6 MB), and is stored under `lounges/<loungeId>/menu/<random>.<ext>` with the Admin
+SDK. The returned download-token URL is put in the item's image field. Uploads don't go straight from the browser:
+the app signs people in with Auth.js, not Firebase Auth, so the bucket's rules can (and should) deny all client
+access:
+
+```
+rules_version = '2';
+service firebase.storage {
+  match /b/{bucket}/o {
+    match /{allPaths=**} { allow read, write: if false; }
+  }
+}
+```
+
+Token URLs keep working with these rules. `@grpc/grpc-js` is pinned to 1.14.6 via `overrides` (Firestore's own pin
+has advisories).
+
 ## Google sign-in
 
-Create an OAuth client (Web) in Google Cloud Console with redirect URI
-`http://localhost:3000/api/auth/callback/google` (plus your production URL), then set `AUTH_GOOGLE_ID` and
-`AUTH_GOOGLE_SECRET`. The Google button appears only when both are set. An email already registered with a password
-is not auto-linked to Google, which is Auth.js's safe default.
+1. Google Cloud Console → APIs & Services → OAuth consent screen: set it up (External, add your test users while
+   it is in "Testing").
+2. Credentials → Create credentials → OAuth client ID → Web application. Authorized redirect URI:
+   `http://localhost:3000/api/auth/callback/google` (plus `https://<your-domain>/api/auth/callback/google` in production).
+3. Put the client ID and secret in `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (Auth.js's
+   `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` names also work) and restart `npm run dev`.
+
+"تسجيل الدخول باستخدام جوجل" then works on the login and register pages and at the booking checkout. In development
+without keys, the login page shows the button disabled with a setup hint; in production it is hidden.
+
+- A first Google sign-in creates a `User` with the default role `CUSTOMER`.
+- If the email already has an account, Google is linked to it (only for Google-verified emails). When that account's
+  email was never verified (self-registration doesn't verify), its password is removed on linking, so someone who
+  registered another person's address can't keep access. Staff and owners keep their roles and passwords.
 
 ## Layout
 

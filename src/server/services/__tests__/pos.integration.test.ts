@@ -7,7 +7,7 @@ import { pricePlay } from "@/lib/booking/session-billing";
 import { getReceipt } from "@/server/queries/receipt";
 import { getLoungeAccess, hasLoungeRole } from "@/server/staff";
 import { createBooking } from "../booking";
-import { closeShift, getShiftSummary, openShift, shiftCashNet } from "../shift";
+import { addShiftExpense, closeShift, getShiftSummary, openShift, shiftCashNet, voidShiftExpense } from "../shift";
 import {
   addSessionOrder,
   cancelBooking,
@@ -559,8 +559,39 @@ describe("cashier shift and cash drawer", () => {
     expect(summary.discounts).toBeGreaterThan(0);
   });
 
+  it("splits drawer cash into gaming and canteen", async () => {
+    const s = (await getShiftSummary(shiftId))!;
+    expect(s.cashGaming + s.cashCanteen).toBe(s.cashNet);
+    expect(s.cashGaming).toBeGreaterThan(0);
+    // Counter sales were paid in cash earlier in this suite.
+    expect(s.cashCanteen).toBeGreaterThan(0);
+  });
+
+  it("records cash expenses, refuses more than the drawer holds, and voids mistakes", async () => {
+    const before = (await getShiftSummary(shiftId))!;
+    const ctx = ctxAt(at(22));
+    await expectCode(addShiftExpense(ctx, { amount: 0, reason: "ice" }), "INVALID_INPUT");
+    await expectCode(addShiftExpense(ctx, { amount: 100_000, reason: "   " }), "INVALID_INPUT");
+    await expectCode(addShiftExpense(ctx, { amount: before.expectedCash + 1, reason: "too much" }), "INSUFFICIENT_CASH");
+
+    const ice = 200_000; // 2,000 IQD
+    await addShiftExpense(ctx, { amount: ice, reason: "  Ice  " });
+    const mistake = await addShiftExpense(ctx, { amount: 50_000, reason: "typo" });
+    await voidShiftExpense(ctx, { expenseId: mistake.expenseId });
+    await expectCode(voidShiftExpense(ctx, { expenseId: mistake.expenseId }), "STALE");
+
+    const after = (await getShiftSummary(shiftId))!;
+    expect(after.expensesTotal).toBe(ice);
+    expect(after.expectedCash).toBe(before.openingFloat + before.cashNet - ice);
+    expect(after.expenses.map((e) => [e.reason, e.amount, e.voided])).toEqual([
+      ["Ice", ice, false],
+      ["typo", 50_000, true],
+    ]);
+  });
+
   it("closes with the counted cash and records the variance", async () => {
     const before = (await getShiftSummary(shiftId))!;
+    expect(before.expectedCash).toBe(before.openingFloat + before.cashNet - before.expensesTotal);
     const counted = before.expectedCash - 100_000; // 1,000 IQD short
     const res = await closeShift(ctxAt(at(23, 59)), { shiftId, countedCash: counted, notes: "short by a note" });
     expect(res).toMatchObject({ expected: before.expectedCash, counted, variance: -100_000 });
@@ -568,6 +599,10 @@ describe("cashier shift and cash drawer", () => {
     const after = (await getShiftSummary(shiftId))!;
     expect(after).toMatchObject({ status: "CLOSED", countedCash: counted, variance: -100_000, notes: "short by a note" });
     await expectCode(closeShift(ctxAt(at(23, 59)), { shiftId, countedCash: counted }), "SHIFT_CLOSED");
+
+    // A closed drawer is final: no new expenses and no voids.
+    await expectCode(addShiftExpense(ctxAt(at(23, 59)), { amount: 1_000, reason: "late" }), "SHIFT_CLOSED");
+    await expectCode(voidShiftExpense(ctxAt(at(23, 59)), { expenseId: after.expenses[0].id }), "SHIFT_CLOSED");
   });
 
   it("refuses to take payments with no open shift", async () => {

@@ -86,17 +86,19 @@ function Report({ s, locale, dict }: { s: ShiftSummary; locale: Locale; dict: Di
         </div>
       </header>
       <Divider />
+      <Line label={dict.shift.shiftNo} value={<span dir="ltr">{s.id.slice(-8).toUpperCase()}</span>} />
       <Line label={dict.pos.cashier} value={s.cashier} />
       <Line label={dict.shift.openedAt} value={dateTime(locale, s.openedAt, tz)} />
       {s.closedAt && <Line label={dict.shift.closedAt} value={dateTime(locale, s.closedAt, tz)} />}
       {s.closedBy && s.closedBy !== s.cashier && <Line label={dict.shift.closedBy} value={s.closedBy} />}
 
       <Divider />
-      <div className="font-bold">{dict.shift.sales}</div>
+      <div className="font-bold">{dict.shift.revenue}</div>
       <Line label={`${dict.shift.sessions}`} value={s.sessions} />
       <Line label={`${dict.shift.counterSales}`} value={s.counterSales} />
       <Line label={dict.receipt.gaming} value={m(s.gaming)} />
       <Line label={dict.receipt.canteen} value={m(s.canteen)} />
+      <Line label={dict.common.total} value={m(s.gaming + s.canteen)} bold />
       {s.discounts > 0 && <Line label={dict.receipt.discount} value={`−${m(s.discounts)}`} />}
       {s.tax > 0 && <Line label={dict.booking.tax} value={m(s.tax)} />}
 
@@ -111,8 +113,17 @@ function Report({ s, locale, dict }: { s: ShiftSummary; locale: Locale; dict: Di
       <Divider />
       <div className="font-bold">{dict.shift.drawer}</div>
       <Line label={dict.shift.openingFloat} value={m(s.openingFloat)} />
-      <Line label={dict.shift.cashTaken} value={m(s.cashNet)} />
-      <Line label={dict.shift.expected} value={m(s.expectedCash)} bold />
+      <Line label={`+ ${dict.shift.cashGaming}`} value={m(s.cashGaming)} />
+      <Line label={`+ ${dict.shift.cashCanteen}`} value={m(s.cashCanteen)} />
+      <Line label={`− ${dict.shift.cashExpenses}`} value={m(s.expensesTotal)} />
+      {s.expenses
+        .filter((x) => !x.voided)
+        .map((x) => (
+          <div key={x.id} className="ps-3 text-[11px]">
+            <Line label={`${x.reason} (${x.by})`} value={`−${m(x.amount)}`} />
+          </div>
+        ))}
+      <Line label={`= ${dict.shift.expected}`} value={m(s.expectedCash)} bold />
       {s.countedCash !== null && <Line label={dict.shift.counted} value={m(s.countedCash)} />}
       {s.variance !== null && (
         <div className="my-1 text-[14px]">

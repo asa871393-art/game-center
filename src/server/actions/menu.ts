@@ -12,6 +12,7 @@ import {
   updateMenuCategory,
   updateMenuItem,
 } from "@/server/services/menu";
+import { uploadProductImage, UploadError, type UploadErrorCode } from "@/lib/firebase-storage";
 import { actionId as id, loungeScoped as base, runLoungeAction as run } from "./pipeline";
 
 /** Canteen menu management: managers and owners. */
@@ -102,5 +103,25 @@ export async function deleteMenuCategoryAction(payload: z.input<typeof categoryI
   return run(categoryIdSchema, payload, "MANAGER", async (ctx, i) => {
     await deleteMenuCategory(ctx, i.categoryId);
     return null;
+  });
+}
+
+const uploadSchema = base.extend({ file: z.instanceof(File) });
+
+/**
+ * Uploads a product photo to Firebase Storage for the item form; the returned URL goes into
+ * the item's imageUrl when the form is saved. Managers only, and always into this lounge's
+ * own folder (the client never chooses the path).
+ */
+export async function uploadMenuImageAction(formData: FormData) {
+  const payload = { locale: formData.get("locale"), loungeId: formData.get("loungeId"), file: formData.get("file") };
+  return run(uploadSchema, payload, "MANAGER", async (ctx, i): Promise<{ url: string } | { error: UploadErrorCode }> => {
+    try {
+      return { url: await uploadProductImage(i.file, `lounges/${ctx.loungeId}/menu`) };
+    } catch (error) {
+      if (!(error instanceof UploadError)) throw error;
+      if (error.code === "UPLOAD_FAILED") console.error("Menu image upload failed", error.cause);
+      return { error: error.code };
+    }
   });
 }

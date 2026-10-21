@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { GoogleSignInButton } from "@/components/auth/auth-forms";
 import { MenuThumb } from "@/components/canteen/menu-icons";
 import { deviceTypeMeta } from "@/components/lounge/device-type";
 import { Alert, AlertDescription } from "@/components/ui/alert";
@@ -39,6 +40,8 @@ interface BookingDialogProps {
   lounge: LoungeDetails;
   checkoutOptions: CheckoutOption[];
   isSignedIn: boolean;
+  /** Offer "Sign in with Google" to guests at checkout. */
+  googleEnabled?: boolean;
   /** Bumped when the lounge's availability changes (live feed). */
   liveTick?: number;
 }
@@ -79,7 +82,7 @@ function useAvailability(slug: string, date: IsoDate | null, liveTick: number) {
   return [state, refresh] as const;
 }
 
-export function BookingDialog({ lounge, checkoutOptions, isSignedIn, liveTick = 0 }: BookingDialogProps) {
+export function BookingDialog({ lounge, checkoutOptions, isSignedIn, googleEnabled = false, liveTick = 0 }: BookingDialogProps) {
   const { dict, locale, t } = useI18n();
   const router = useRouter();
   const pathname = usePathname();
@@ -242,13 +245,17 @@ export function BookingDialog({ lounge, checkoutOptions, isSignedIn, liveTick = 
                 {submitting ? dict.booking.submitting : isOnline ? dict.booking.submitAndPay : dict.booking.submit}
               </Button>
             ) : (
-              <Link
-                href={`/${locale}/login?callbackUrl=${encodeURIComponent(pathname)}`}
-                className={buttonVariants()}
-              >
-                <LogIn aria-hidden />
-                {dict.booking.signInToBook}
-              </Link>
+              <div className="flex flex-wrap justify-end gap-2">
+                {/* One tap to Google and straight back here; the draft survives the round trip. */}
+                {googleEnabled && <GoogleSignInButton callbackUrl={pathname} className="min-w-60 flex-1" />}
+                <Link
+                  href={`/${locale}/login?callbackUrl=${encodeURIComponent(pathname)}`}
+                  className={buttonVariants({ variant: googleEnabled ? "outline" : "default", className: "h-12" })}
+                >
+                  <LogIn aria-hidden />
+                  {dict.booking.signInToBook}
+                </Link>
+              </div>
             )}
           </div>
         </DialogFooter>

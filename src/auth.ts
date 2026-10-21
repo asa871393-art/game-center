@@ -8,7 +8,7 @@ import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { z } from "zod";
 import type { Role } from "@/generated/prisma/client";
-import { env, isGoogleAuthEnabled } from "@/lib/env";
+import { env, googleOAuth, isGoogleAuthEnabled } from "@/lib/env";
 import { prisma } from "@/lib/prisma";
 
 declare module "next-auth" {
@@ -52,7 +52,15 @@ const providers: Provider[] = [
 ];
 
 if (isGoogleAuthEnabled) {
-  providers.push(Google({ clientId: env.AUTH_GOOGLE_ID, clientSecret: env.AUTH_GOOGLE_SECRET }));
+  providers.push(
+    Google({
+      clientId: googleOAuth.clientId,
+      clientSecret: googleOAuth.clientSecret,
+      // Link to an existing account with the same email. Safe only because signIn below
+      // requires a Google-verified email and linkAccount drops unverified passwords.
+      allowDangerousEmailAccountLinking: true,
+    }),
+  );
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
@@ -79,12 +87,28 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       session.user.role = token.role ?? "CUSTOMER";
       return session;
     },
-    async signIn({ user, account }) {
+    async signIn({ user, account, profile }) {
       if (account?.provider === "credentials") return true;
+      // Only addresses Google has verified may create or link an account.
+      if (account?.provider === "google" && profile?.email_verified !== true) return false;
       // Block OAuth sign-in for deactivated accounts.
       if (!user.email) return false;
       const existing = await prisma.user.findUnique({ where: { email: user.email }, select: { isActive: true } });
       return existing?.isActive ?? true;
+    },
+  },
+  events: {
+    /**
+     * Runs when a Google account is attached, to a new user (created by the adapter with the
+     * schema default role CUSTOMER) or an existing one with the same email. Registration doesn't
+     * verify emails, so a password set on a never-verified account may belong to someone who
+     * registered this address first; drop it so only the Google-verified owner can sign in.
+     */
+    async linkAccount({ user, account }) {
+      if (account.provider !== "google" || !user.id) return;
+      const current = await prisma.user.findUnique({ where: { id: user.id }, select: { emailVerified: true } });
+      if (!current || current.emailVerified) return;
+      await prisma.user.update({ where: { id: user.id }, data: { emailVerified: new Date(), passwordHash: null } });
     },
   },
 });

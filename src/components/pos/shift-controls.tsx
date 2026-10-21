@@ -1,6 +1,6 @@
 "use client";
 
-import { CheckCircle2, Loader2, LockKeyhole, Minus, Plus, Printer, Unlock } from "lucide-react";
+import { CheckCircle2, HandCoins, Loader2, LockKeyhole, Minus, Plus, Printer, Undo2, Unlock } from "lucide-react";
 import { useState } from "react";
 import { usePos, usePosAction } from "@/components/manage/pos-context";
 import { Button } from "@/components/ui/button";
@@ -11,7 +11,7 @@ import { useI18n } from "@/i18n/client";
 import { formatTime, money } from "@/i18n/format";
 import { toMinor, type Minor } from "@/lib/money";
 import { cn } from "@/lib/utils";
-import { closeShiftAction, openShiftAction } from "@/server/actions/pos";
+import { addShiftExpenseAction, closeShiftAction, openShiftAction, voidShiftExpenseAction } from "@/server/actions/pos";
 import type { PosBoardData } from "@/server/queries/manage";
 import { printShiftReport } from "./print";
 
@@ -38,8 +38,17 @@ export function ShiftBar() {
   const { data } = usePos();
   const [openDialog, setOpenDialog] = useState(false);
   const [closeDialog, setCloseDialog] = useState(false);
+  const [expenseDialog, setExpenseDialog] = useState(false);
+  // Lives here, not in the close dialog: once the shift closes the board refreshes with no
+  // shift, and the "closed + print Z-report" screen must survive that re-render.
+  const [closed, setClosed] = useState<CloseResult | null>(null);
   const shift = data.shift;
   const tz = data.lounge.timezone;
+  const closedDialog = (
+    <Dialog open={!!closed} onOpenChange={(o) => !o && setClosed(null)}>
+      <DialogContent className="sm:max-w-2xl">{closed && <ClosedView result={closed} onDone={() => setClosed(null)} />}</DialogContent>
+    </Dialog>
+  );
 
   if (!shift) {
     return (
@@ -48,6 +57,7 @@ export function ShiftBar() {
           <Unlock aria-hidden /> {dict.shift.open}
         </Button>
         <OpenShiftDialog open={openDialog} onOpenChange={setOpenDialog} />
+        {closedDialog}
       </>
     );
   }
@@ -65,11 +75,145 @@ export function ShiftBar() {
           <div className="text-muted-foreground">{dict.shift.cashInDrawer}</div>
           <div className="text-base font-bold tabular-nums text-emerald-300">{money(locale, shift.expectedCash, data.lounge.currency)}</div>
         </div>
+        <Button variant="outline" className="h-10" onClick={() => setExpenseDialog(true)} title={dict.shift.expenses.title}>
+          <HandCoins aria-hidden /> <span className="hidden lg:inline">{dict.shift.expenses.button}</span>
+        </Button>
         <Button variant="outline" className="h-10" onClick={() => setCloseDialog(true)}>
           <LockKeyhole aria-hidden /> <span className="hidden lg:inline">{dict.shift.close}</span>
         </Button>
       </div>
-      <CloseShiftDialog open={closeDialog} onOpenChange={setCloseDialog} shift={shift} />
+      <ExpenseDialog open={expenseDialog} onOpenChange={setExpenseDialog} shift={shift} />
+      <CloseShiftDialog
+        open={closeDialog}
+        onOpenChange={setCloseDialog}
+        shift={shift}
+        onClosed={(r) => {
+          setCloseDialog(false);
+          setClosed(r);
+        }}
+      />
+      {closedDialog}
+    </>
+  );
+}
+
+const EXPENSE_PRESETS: Minor[] = [1_000, 5_000, 10_000, 25_000].map((d) => d * 100);
+
+function ExpenseDialog({ open, onOpenChange, shift }: { open: boolean; onOpenChange: (o: boolean) => void; shift: ShiftData }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[94dvh] flex-col sm:max-w-lg">{open && <ExpenseForm shift={shift} onDone={() => onOpenChange(false)} />}</DialogContent>
+    </Dialog>
+  );
+}
+
+function ExpenseForm({ shift, onDone }: { shift: ShiftData; onDone: () => void }) {
+  const { dict, locale, t } = useI18n();
+  const { data } = usePos();
+  const { pending, run } = usePosAction();
+  const e = dict.shift.expenses;
+  const m = (v: Minor) => money(locale, v, data.lounge.currency);
+  const [amount, setAmount] = useState<Minor>(0);
+  const [reason, setReason] = useState("");
+  const tooMuch = amount > shift.expectedCash;
+  const valid = amount > 0 && !tooMuch && reason.trim().length > 0;
+
+  const add = () =>
+    run(
+      () => addShiftExpenseAction({ locale, loungeId: data.lounge.id, amount, reason: reason.trim() }),
+      () => {
+        onDone();
+        return e.added;
+      },
+    );
+
+  const voidOne = (x: ShiftData["expenses"][number]) => {
+    if (!window.confirm(t(e.confirmVoid, { amount: m(x.amount), reason: x.reason }))) return;
+    run(
+      () => voidShiftExpenseAction({ locale, loungeId: data.lounge.id, expenseId: x.id }),
+      () => e.voidedToast,
+    );
+  };
+
+  return (
+    <>
+      <DialogHeader>
+        <DialogTitle>{e.title}</DialogTitle>
+        <DialogDescription>{e.hint}</DialogDescription>
+      </DialogHeader>
+      <div className="-mx-1 flex-1 space-y-4 overflow-y-auto px-1">
+        <label className="block space-y-1.5">
+          <span className="flex justify-between text-sm font-medium">
+            {e.amount}
+            <span className={cn("font-normal", tooMuch ? "text-destructive" : "text-muted-foreground")}>
+              {t(e.available, { amount: m(shift.expectedCash) })}
+            </span>
+          </span>
+          <Input
+            inputMode="decimal"
+            dir="ltr"
+            autoFocus
+            aria-invalid={tooMuch}
+            className="h-14 text-end text-2xl font-bold tabular-nums"
+            value={toInput(amount)}
+            onFocus={(ev) => ev.currentTarget.select()}
+            onChange={(ev) => {
+              const v = parseMoney(ev.target.value);
+              if (v !== null) setAmount(v);
+            }}
+          />
+        </label>
+        <div className="grid grid-cols-4 gap-2">
+          {EXPENSE_PRESETS.map((v) => (
+            <Button key={v} variant={amount === v ? "secondary" : "outline"} className="h-11 tabular-nums" onClick={() => setAmount(v)}>
+              {m(v)}
+            </Button>
+          ))}
+        </div>
+        <label className="block space-y-1.5">
+          <span className="text-sm font-medium">{e.reason}</span>
+          <Input className="h-12 text-base" placeholder={e.reasonPlaceholder} value={reason} maxLength={120} onChange={(ev) => setReason(ev.target.value)} />
+        </label>
+        <div className="flex flex-wrap gap-2">
+          {e.quickReasons.map((r) => (
+            <Button key={r} size="sm" variant={reason === r ? "secondary" : "outline"} className="h-9 rounded-full" onClick={() => setReason(r)}>
+              {r}
+            </Button>
+          ))}
+        </div>
+
+        <section className="rounded-xl border p-3 text-sm">
+          <div className="mb-1 font-semibold">{e.list}</div>
+          {shift.expenses.length === 0 ? (
+            <div className="text-muted-foreground">{e.none}</div>
+          ) : (
+            <ul className="divide-y">
+              {shift.expenses.map((x) => (
+                <li key={x.id} className={cn("flex items-center gap-2 py-1.5", x.voided && "text-muted-foreground line-through")}>
+                  <span className="min-w-0 flex-1 truncate">
+                    {x.reason}
+                    <span className="ms-1.5 text-xs text-muted-foreground no-underline" suppressHydrationWarning>
+                      · {x.by} · {formatTime(locale, x.at, data.lounge.timezone)}
+                    </span>
+                  </span>
+                  <span className="tabular-nums">−{m(x.amount)}</span>
+                  {x.voided ? (
+                    <span className="text-xs no-underline">{e.voided}</span>
+                  ) : (
+                    <Button size="sm" variant="ghost" className="h-8 text-destructive" disabled={pending} onClick={() => voidOne(x)}>
+                      <Undo2 aria-hidden /> {e.void}
+                    </Button>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </section>
+      </div>
+      <Button size="lg" className="h-14 text-lg" disabled={pending || !valid} onClick={add}>
+        {pending ? <Loader2 className="animate-spin" aria-hidden /> : <HandCoins aria-hidden />}
+        {e.add}
+      </Button>
     </>
   );
 }
@@ -138,21 +282,20 @@ interface CloseResult {
   variance: Minor;
 }
 
-function CloseShiftDialog({ open, onOpenChange, shift }: { open: boolean; onOpenChange: (o: boolean) => void; shift: ShiftData }) {
-  const [result, setResult] = useState<CloseResult | null>(null);
-  const close = (o: boolean) => {
-    if (!o) setResult(null);
-    onOpenChange(o);
-  };
+function CloseShiftDialog({
+  open,
+  onOpenChange,
+  shift,
+  onClosed,
+}: {
+  open: boolean;
+  onOpenChange: (o: boolean) => void;
+  shift: ShiftData;
+  onClosed: (r: CloseResult) => void;
+}) {
   return (
-    <Dialog open={open || !!result} onOpenChange={close}>
-      <DialogContent className="flex max-h-[94dvh] flex-col sm:max-w-2xl">
-        {result ? (
-          <ClosedView result={result} onDone={() => close(false)} />
-        ) : (
-          open && <CloseForm shift={shift} onClosed={setResult} />
-        )}
-      </DialogContent>
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="flex max-h-[94dvh] flex-col sm:max-w-2xl">{open && <CloseForm shift={shift} onClosed={onClosed} />}</DialogContent>
     </Dialog>
   );
 }
@@ -217,13 +360,26 @@ function CloseForm({ shift, onClosed }: { shift: ShiftData; onClosed: (r: CloseR
           </div>
         </section>
 
-        <section className="rounded-xl border p-3">
-          <div className="mb-2 flex items-baseline justify-between text-sm">
-            <span className="font-semibold">{dict.shift.countDrawer}</span>
-            <span className="text-muted-foreground">
-              {dict.shift.openingFloat}: {m(shift.openingFloat)} + {dict.shift.cashTaken}: {m(shift.cashNet)}
-            </span>
+        <section className="rounded-xl border p-3 text-sm">
+          <div className="mb-1 font-semibold">{dict.shift.drawer}</div>
+          <DrawerLine label={dict.shift.openingFloat} value={m(shift.openingFloat)} />
+          <DrawerLine label={dict.shift.cashGaming} value={`+${m(shift.cashGaming)}`} />
+          <DrawerLine label={dict.shift.cashCanteen} value={`+${m(shift.cashCanteen)}`} />
+          <DrawerLine label={dict.shift.cashExpenses} value={`−${m(shift.expensesTotal)}`} tone={shift.expensesTotal > 0 ? "neg" : undefined} />
+          {shift.expenses
+            .filter((x) => !x.voided)
+            .map((x) => (
+              <DrawerLine key={x.id} label={`· ${x.reason}`} value={`−${m(x.amount)}`} small />
+            ))}
+          <div className="mt-1 flex justify-between border-t pt-1 font-semibold">
+            <span>{dict.shift.expected}</span>
+            <span className="tabular-nums">{m(shift.expectedCash)}</span>
           </div>
+          <div className="text-[11px] text-muted-foreground">{dict.shift.expectedFormula}</div>
+        </section>
+
+        <section className="rounded-xl border p-3">
+          <div className="mb-2 text-sm font-semibold">{dict.shift.countDrawer}</div>
           <div className="grid grid-cols-1 gap-1.5 sm:grid-cols-2">
             {DENOMINATIONS.map((d) => (
               <div key={d} className="flex items-center gap-2 rounded-lg bg-muted/40 p-1.5">
@@ -322,6 +478,15 @@ function ClosedView({ result, onDone }: { result: CloseResult; onDone: () => voi
           {dict.common.close}
         </Button>
       </div>
+    </div>
+  );
+}
+
+function DrawerLine({ label, value, tone, small }: { label: string; value: string; tone?: "neg"; small?: boolean }) {
+  return (
+    <div className={cn("flex justify-between py-0.5", small && "ps-3 text-xs text-muted-foreground", tone === "neg" && "text-rose-400")}>
+      <span className="min-w-0 truncate">{label}</span>
+      <span className="shrink-0 tabular-nums">{value}</span>
     </div>
   );
 }

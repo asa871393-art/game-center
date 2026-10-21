@@ -1,7 +1,7 @@
 "use client";
 
-import { Check, Infinity as InfinityIcon, Loader2, Plus, Save, X } from "lucide-react";
-import { useState, useTransition } from "react";
+import { Check, ImageUp, Infinity as InfinityIcon, Loader2, Plus, Save, X } from "lucide-react";
+import { useRef, useState, useTransition } from "react";
 import { toast } from "sonner";
 import { MENU_ICON_NAMES, MENU_ICONS, MenuThumb } from "@/components/canteen/menu-icons";
 import { MoneyInput } from "@/components/devices/money-input";
@@ -16,10 +16,13 @@ import { useI18n } from "@/i18n/client";
 import { localName, money } from "@/i18n/format";
 import type { Minor } from "@/lib/money";
 import { cn } from "@/lib/utils";
-import { createMenuCategoryAction, createMenuItemAction, updateMenuItemAction } from "@/server/actions/menu";
+import { createMenuCategoryAction, createMenuItemAction, updateMenuItemAction, uploadMenuImageAction } from "@/server/actions/menu";
 import type { AdminMenuItem, MenuAdminData } from "@/server/queries/menu";
 
 const KINDS: MenuItemCategory[] = ["DRINK", "SNACK", "MEAL", "DESSERT", "HOOKAH", "OTHER"];
+const UPLOAD_ACCEPT = "image/jpeg,image/png,image/webp,image/gif";
+/** Mirrors MAX_PRODUCT_IMAGE_BYTES (server-only module). */
+const MAX_UPLOAD_BYTES = 5 * 1024 * 1024;
 
 interface FormState {
   name: string;
@@ -123,6 +126,29 @@ function ItemForm({
   const imageInvalid = imageUrl !== "" && !/^https?:\/\/\S+$/i.test(imageUrl);
   const imageOk = imageUrl !== "" && !imageInvalid;
   const [brokenUrl, setBrokenUrl] = useState<string | null>(null);
+  const fileInput = useRef<HTMLInputElement>(null);
+  const [uploading, startUpload] = useTransition();
+
+  // Checked again (by content, not name) on the server; this just saves a pointless round trip.
+  const upload = (file: File) => {
+    if (file.size > MAX_UPLOAD_BYTES) {
+      toast.error(m.uploadErrors.TOO_LARGE);
+      return;
+    }
+    const body = new FormData();
+    body.set("locale", locale);
+    body.set("loungeId", data.lounge.id);
+    body.set("file", file);
+    startUpload(async () => {
+      const res = await uploadMenuImageAction(body);
+      if (!res.ok) toast.error(res.error);
+      else if ("error" in res.data) toast.error(m.uploadErrors[res.data.error]);
+      else {
+        set("imageUrl", res.data.url);
+        toast.success(m.uploaded);
+      }
+    });
+  };
   const imageBroken = imageOk && brokenUrl === imageUrl;
   const margin =
     form.price !== null && form.costPrice !== null && form.price > 0 ? Math.round(((form.price - form.costPrice) / form.price) * 100) : null;
@@ -388,6 +414,28 @@ function ItemForm({
               <p className={cn("text-xs", imageInvalid || imageBroken ? "text-destructive" : "text-muted-foreground")}>
                 {imageInvalid ? m.imageInvalid : imageBroken ? m.imageBroken : m.imageHint}
               </p>
+              {data.imageUploads && (
+                <div className="flex flex-wrap items-center gap-2">
+                  <input
+                    ref={fileInput}
+                    type="file"
+                    accept={UPLOAD_ACCEPT}
+                    className="sr-only"
+                    tabIndex={-1}
+                    aria-hidden
+                    onChange={(e) => {
+                      const file = e.target.files?.[0];
+                      e.target.value = "";
+                      if (file) upload(file);
+                    }}
+                  />
+                  <Button variant="secondary" className="h-11" disabled={uploading || pending} onClick={() => fileInput.current?.click()}>
+                    {uploading ? <Loader2 className="animate-spin" aria-hidden /> : <ImageUp aria-hidden />}
+                    {uploading ? m.uploading : m.uploadImage}
+                  </Button>
+                  <span className="text-xs text-muted-foreground">{m.uploadHint}</span>
+                </div>
+              )}
             </div>
           </div>
         </section>

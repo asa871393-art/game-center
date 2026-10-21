@@ -19,7 +19,7 @@ import {
   startWalkIn,
   transferSession,
 } from "@/server/services/pos";
-import { closeShift, openShift } from "@/server/services/shift";
+import { addShiftExpense, closeShift, openShift, voidShiftExpense } from "@/server/services/shift";
 
 export type { PosActionResult };
 
@@ -164,6 +164,21 @@ const closeShiftSchema = base.extend({
 
 export async function closeShiftAction(payload: z.input<typeof closeShiftSchema>) {
   return run(closeShiftSchema, payload, "STAFF", (ctx, i) => closeShift(ctx, i));
+}
+
+const expenseSchema = base.extend({
+  amount: z.number().int().positive(),
+  reason: z.string().trim().min(1).max(120),
+});
+
+export async function addShiftExpenseAction(payload: z.input<typeof expenseSchema>) {
+  return run(expenseSchema, payload, "STAFF", (ctx, i) => addShiftExpense(ctx, i));
+}
+
+const voidExpenseSchema = base.extend({ expenseId: id });
+
+export async function voidShiftExpenseAction(payload: z.input<typeof voidExpenseSchema>) {
+  return run(voidExpenseSchema, payload, "STAFF", (ctx, i) => voidShiftExpense(ctx, i));
 }
 
 const deviceStatusSchema = base.extend({ deviceId: id, status: z.enum(["IDLE", "MAINTENANCE", "OFFLINE"]) });

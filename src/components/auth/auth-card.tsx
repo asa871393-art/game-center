@@ -1,6 +1,6 @@
 import Link from "next/link";
 import type { ReactNode } from "react";
-import { GoogleSignInButton } from "./auth-forms";
+import { GoogleSignInButton, GoogleSignInUnavailable } from "./auth-forms";
 
 /** Shared frame for the sign-in and sign-up pages. */
 export function AuthCard({
@@ -26,9 +26,9 @@ export function AuthCard({
         <h1 className="text-2xl font-bold">{title}</h1>
         <p className="text-sm text-muted-foreground">{subtitle}</p>
       </div>
-      {googleEnabled && (
+      {(googleEnabled || process.env.NODE_ENV === "development") && (
         <>
-          <GoogleSignInButton callbackUrl={callbackUrl} />
+          {googleEnabled ? <GoogleSignInButton callbackUrl={callbackUrl} /> : <GoogleSignInUnavailable />}
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
             <span className="h-px flex-1 bg-border" />
             {orLabel}

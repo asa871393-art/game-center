@@ -122,25 +122,59 @@ export function SignUpForm({ callbackUrl }: { callbackUrl: string }) {
   );
 }
 
-export function GoogleSignInButton({ callbackUrl }: { callbackUrl: string }) {
+export function GoogleSignInButton({ callbackUrl, className }: { callbackUrl: string; className?: string }) {
   const { dict, locale } = useI18n();
   return (
-    <form action={signInWithGoogle}>
+    <form action={signInWithGoogle} className={className}>
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="callbackUrl" value={callbackUrl} />
-      <GoogleSubmit label={dict.auth.continueWithGoogle} />
+      <GoogleSubmit label={dict.auth.continueWithGoogle} pendingLabel={dict.auth.redirectingToGoogle} />
     </form>
   );
 }
 
-function GoogleSubmit({ label }: { label: string }) {
-  const { pending } = useFormStatus();
+/** Shown in development when no Google keys are configured, so the missing setup is obvious. */
+export function GoogleSignInUnavailable() {
+  const { dict } = useI18n();
   return (
-    <Button type="submit" variant="outline" size="lg" className="w-full" disabled={pending}>
+    <div className="space-y-2">
+      <GoogleButtonFace label={dict.auth.continueWithGoogle} disabled />
+      <p className="rounded-lg border border-dashed border-amber-500/50 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
+        {dict.auth.googleNotConfigured}
+      </p>
+    </div>
+  );
+}
+
+function GoogleSubmit({ label, pendingLabel }: { label: string; pendingLabel: string }) {
+  const { pending } = useFormStatus();
+  return <GoogleButtonFace type="submit" label={pending ? pendingLabel : label} pending={pending} disabled={pending} />;
+}
+
+/** Google-branded button: white face, official "G" mark. */
+function GoogleButtonFace({
+  label,
+  pending = false,
+  disabled,
+  type = "button",
+}: {
+  label: string;
+  pending?: boolean;
+  disabled?: boolean;
+  type?: "button" | "submit";
+}) {
+  return (
+    <Button
+      type={type}
+      size="lg"
+      disabled={disabled}
+      aria-busy={pending}
+      className="h-12 w-full gap-3 border border-zinc-300 bg-white text-base font-semibold text-zinc-800 shadow-sm hover:bg-zinc-50 disabled:opacity-70 dark:border-zinc-600"
+    >
       {pending ? (
-        <Loader2 className="animate-spin" aria-hidden />
+        <Loader2 className="size-5 animate-spin" aria-hidden />
       ) : (
-        <svg viewBox="0 0 24 24" className="size-4" aria-hidden>
+        <svg viewBox="0 0 24 24" className="size-5" aria-hidden>
           <path fill="#4285F4" d="M23.5 12.3c0-.8-.1-1.6-.2-2.3H12v4.4h6.5a5.5 5.5 0 0 1-2.4 3.6v3h3.9c2.2-2.1 3.5-5.1 3.5-8.7Z" />
           <path fill="#34A853" d="M12 24c3.2 0 6-1.1 8-2.9l-3.9-3c-1.1.7-2.5 1.2-4.1 1.2-3.1 0-5.8-2.1-6.7-5H1.3v3.1A12 12 0 0 0 12 24Z" />
           <path fill="#FBBC05" d="M5.3 14.3a7.2 7.2 0 0 1 0-4.6V6.6h-4a12 12 0 0 0 0 10.8l4-3.1Z" />
