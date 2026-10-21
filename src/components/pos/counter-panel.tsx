@@ -7,7 +7,7 @@ import { cartLines, cartSubtotal, MenuPicker, type Cart } from "@/components/man
 import { usePos, usePosAction } from "@/components/manage/pos-context";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/client";
-import { money } from "@/i18n/format";
+import { localName, money } from "@/i18n/format";
 import { applyBps } from "@/lib/money";
 import { counterSaleAction } from "@/server/actions/pos";
 import { nextRowKey, PaymentSplit, paymentsBalance, type PaymentRow } from "./payment-split";
@@ -89,7 +89,7 @@ export function CounterPanel() {
                 return (
                   <li key={l.menuItemId} className="flex justify-between gap-2 p-2">
                     <span>
-                      {l.quantity}× {item.name}
+                      {l.quantity}× {localName(locale, item)}
                     </span>
                     <span className="tabular-nums">{money(locale, item.price * l.quantity, cur)}</span>
                   </li>

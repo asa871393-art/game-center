@@ -27,7 +27,8 @@ export async function getPosBoard(loungeId: string, now = new Date()) {
       categories: { orderBy: { baseHourlyRate: "asc" } },
       devices: { where: { archivedAt: null }, orderBy: [{ posY: "asc" }, { posX: "asc" }] },
       pricingRules: { where: { isActive: true } },
-      menuItems: { orderBy: [{ category: "asc" }, { sortOrder: "asc" }] },
+      menuItems: { where: { archivedAt: null }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] },
+      menuCategories: { orderBy: [{ sortOrder: "asc" }, { name: "asc" }] },
     },
   });
   if (!lounge) return null;
@@ -215,12 +216,18 @@ export async function getPosBoard(loungeId: string, now = new Date()) {
         isActive: r.isActive,
       }),
     ),
+    menuCategories: lounge.menuCategories.map((c) => ({ id: c.id, name: c.name, nameEn: c.nameEn, kind: c.kind })),
     menuItems: lounge.menuItems.map((m) => ({
       id: m.id,
       name: m.name,
+      nameEn: m.nameEn,
+      menuCategoryId: m.menuCategoryId,
       category: m.category,
       price: toMinor(m.price),
+      imageUrl: m.imageUrl,
+      iconName: m.iconName,
       stock: m.stockQuantity,
+      lowStockAt: m.lowStockAt,
       isAvailable: m.isAvailable && (m.stockQuantity === null || m.stockQuantity > 0),
     })),
     devices,

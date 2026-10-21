@@ -84,18 +84,40 @@ const CATEGORIES: CategorySeed[] = [
   },
 ];
 
-const MENU = [
-  { name: "ريد بول 250 مل", category: MenuItemCategory.DRINK, price: "2500", sku: "DRK-RB250", stockQuantity: 48 },
-  { name: "بيبسي", category: MenuItemCategory.DRINK, price: "1000", sku: "DRK-PEPSI", stockQuantity: 96 },
-  { name: "ماء 500 مل", category: MenuItemCategory.DRINK, price: "500", sku: "DRK-H2O", stockQuantity: 120 },
-  { name: "آيس لاتيه", category: MenuItemCategory.DRINK, price: "3500", sku: "DRK-LATTE", stockQuantity: null },
-  { name: "دوريتوس", category: MenuItemCategory.SNACK, price: "1500", sku: "SNK-DORITOS", stockQuantity: 40 },
-  { name: "بوب كورن", category: MenuItemCategory.SNACK, price: "2000", sku: "SNK-POP", stockQuantity: null },
-  { name: "برغر دجاج", category: MenuItemCategory.MEAL, price: "6000", sku: "MEAL-BURGER", stockQuantity: null },
-  { name: "شريحة بيتزا", category: MenuItemCategory.MEAL, price: "3500", sku: "MEAL-PIZZA", stockQuantity: null },
-  { name: "أركيلة تفاحتين", category: MenuItemCategory.HOOKAH, price: "10000", sku: "HKH-2APPLE", stockQuantity: null },
-  { name: "أركيلة عنب ونعناع", category: MenuItemCategory.HOOKAH, price: "10000", sku: "HKH-GRAPEMINT", stockQuantity: null },
-  { name: "تبديل رأس أركيلة", category: MenuItemCategory.HOOKAH, price: "4000", sku: "HKH-REFILL", stockQuantity: null },
+/** Menu sections, in display order. */
+const MENU_CATEGORIES = [
+  { key: "cold", name: "مشروبات باردة", nameEn: "Cold drinks", kind: MenuItemCategory.DRINK },
+  { key: "hot", name: "مشروبات ساخنة", nameEn: "Hot drinks", kind: MenuItemCategory.DRINK },
+  { key: "snacks", name: "سناكات", nameEn: "Snacks", kind: MenuItemCategory.SNACK },
+  { key: "meals", name: "وجبات", nameEn: "Meals", kind: MenuItemCategory.MEAL },
+  { key: "hookah", name: "أراكيل", nameEn: "Hookah", kind: MenuItemCategory.HOOKAH },
+] as const;
+
+type MenuSeed = {
+  section: (typeof MENU_CATEGORIES)[number]["key"];
+  name: string;
+  nameEn: string;
+  price: string;
+  costPrice: string;
+  sku: string;
+  stockQuantity: number | null;
+  iconName: string;
+};
+
+const MENU: MenuSeed[] = [
+  { section: "cold", name: "ريد بول 250 مل", nameEn: "Red Bull 250ml", price: "2500", costPrice: "1500", sku: "DRK-RB250", stockQuantity: 48, iconName: "zap" },
+  { section: "cold", name: "بيبسي", nameEn: "Pepsi", price: "1000", costPrice: "500", sku: "DRK-PEPSI", stockQuantity: 96, iconName: "cup-soda" },
+  { section: "cold", name: "ماء 500 مل", nameEn: "Water 500ml", price: "500", costPrice: "200", sku: "DRK-H2O", stockQuantity: 120, iconName: "glass-water" },
+  { section: "cold", name: "آيس لاتيه", nameEn: "Iced latte", price: "3500", costPrice: "1200", sku: "DRK-LATTE", stockQuantity: null, iconName: "coffee" },
+  { section: "hot", name: "قهوة تركية", nameEn: "Turkish coffee", price: "2000", costPrice: "600", sku: "HOT-TURKISH", stockQuantity: null, iconName: "coffee" },
+  { section: "hot", name: "شاي عراقي", nameEn: "Iraqi tea", price: "1000", costPrice: "250", sku: "HOT-TEA", stockQuantity: null, iconName: "cup-soda" },
+  { section: "snacks", name: "دوريتوس", nameEn: "Doritos", price: "1500", costPrice: "900", sku: "SNK-DORITOS", stockQuantity: 40, iconName: "cookie" },
+  { section: "snacks", name: "بوب كورن", nameEn: "Popcorn", price: "2000", costPrice: "500", sku: "SNK-POP", stockQuantity: null, iconName: "popcorn" },
+  { section: "meals", name: "برغر دجاج", nameEn: "Chicken burger", price: "6000", costPrice: "3000", sku: "MEAL-BURGER", stockQuantity: null, iconName: "sandwich" },
+  { section: "meals", name: "شريحة بيتزا", nameEn: "Pizza slice", price: "3500", costPrice: "1500", sku: "MEAL-PIZZA", stockQuantity: null, iconName: "pizza" },
+  { section: "hookah", name: "أركيلة تفاحتين", nameEn: "Double apple hookah", price: "10000", costPrice: "3000", sku: "HKH-2APPLE", stockQuantity: null, iconName: "flame" },
+  { section: "hookah", name: "أركيلة عنب ونعناع", nameEn: "Grape & mint hookah", price: "10000", costPrice: "3000", sku: "HKH-GRAPEMINT", stockQuantity: null, iconName: "flame" },
+  { section: "hookah", name: "تبديل رأس أركيلة", nameEn: "Hookah head refill", price: "4000", costPrice: "1000", sku: "HKH-REFILL", stockQuantity: null, iconName: "flame" },
 ];
 
 interface LoungeSeed {
@@ -321,8 +343,21 @@ async function seedLounge(organizationId: string, seed: LoungeSeed, members: { u
     ],
   });
 
+  const sections = new Map<string, { id: string; kind: MenuItemCategory }>();
+  for (const [sortOrder, c] of MENU_CATEGORIES.entries()) {
+    const created = await prisma.menuCategory.create({
+      data: { loungeId: lounge.id, name: c.name, nameEn: c.nameEn, kind: c.kind, sortOrder },
+    });
+    sections.set(c.key, { id: created.id, kind: c.kind });
+  }
   await prisma.menuItem.createMany({
-    data: MENU.map((item, sortOrder) => ({ ...item, loungeId: lounge.id, sortOrder })),
+    data: MENU.map(({ section, ...item }, sortOrder) => ({
+      ...item,
+      loungeId: lounge.id,
+      menuCategoryId: sections.get(section)!.id,
+      category: sections.get(section)!.kind,
+      sortOrder,
+    })),
   });
 
   return { lounge, deviceCount: devices.length };

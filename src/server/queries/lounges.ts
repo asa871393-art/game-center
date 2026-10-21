@@ -94,7 +94,8 @@ export async function getLoungeDetails(slug: string) {
       categories: { where: { isActive: true }, orderBy: { baseHourlyRate: "asc" } },
       devices: { where: { archivedAt: null }, orderBy: [{ posY: "asc" }, { posX: "asc" }] },
       pricingRules: { where: { isActive: true } },
-      menuItems: { where: { isAvailable: true }, orderBy: [{ category: "asc" }, { sortOrder: "asc" }] },
+      menuItems: { where: { isAvailable: true, archivedAt: null }, orderBy: [{ sortOrder: "asc" }, { name: "asc" }] },
+      menuCategories: { orderBy: [{ sortOrder: "asc" }, { name: "asc" }] },
     },
   });
   if (!lounge) return null;
@@ -162,9 +163,13 @@ export async function getLoungeDetails(slug: string) {
         isActive: r.isActive,
       }),
     ),
+    menuCategories: lounge.menuCategories.map((c) => ({ id: c.id, name: c.name, nameEn: c.nameEn, kind: c.kind })),
     menuItems: lounge.menuItems.map((m) => ({
       id: m.id,
       name: m.name,
+      nameEn: m.nameEn,
+      menuCategoryId: m.menuCategoryId,
+      iconName: m.iconName,
       description: m.description,
       category: m.category,
       price: toMinor(m.price),

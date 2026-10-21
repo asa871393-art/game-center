@@ -155,6 +155,28 @@ dashboard and `/admin`):
   transfer and live bills. Time-of-day rules still apply on top. Changing a rate while an open session is running bills
   the time so far at the old rate and the rest at the new one.
 
+**Canteen menu management** (`/[locale]/pos/[loungeId]/menu`, managers and owners; linked from the POS top bar,
+Device Management, the dashboard and `/admin`):
+- **Sections** (`MenuCategory`): each lounge defines its own, e.g. "مشروبات باردة / Cold drinks", with Arabic and
+  English names, a broad type (drink, snack, meal, dessert, hookah, other) for icons and reports, and a position.
+  Only empty sections can be deleted.
+- **Items:** search by name or SKU, filter tabs per section plus a *Low / out* tab. Each item shows name (Arabic and
+  English), selling price, cost and margin, stock state (in stock / low / out / unlimited) and 30-day sales. Quick
+  actions are Pause / Make available (staff may do this too), Adjust stock, Edit and Delete.
+- **Add / edit form:**
+  - Names: Arabic and optional English name, shown in the English UI.
+  - Section: pick one, or create it inline.
+  - Prices: selling price and cost, with a live margin.
+  - Stock: a quantity or *unlimited* (e.g. fresh coffee), plus the low-stock threshold.
+  - Display: an icon or image URL, SKU and description.
+  - Availability toggle.
+  - Saving is refused if POS sales changed the stock since the form was opened, so counts are never overwritten.
+- **Adjust stock** adds deliveries or writes off damaged stock relative to the live count.
+- **Delete:** a never-sold item is deleted; one with order history is **archived** (hidden from the POS and booking
+  site, order lines kept for sales reports) and can be restored.
+- **Live on the POS:** a database trigger announces menu changes, so price, availability, stock and new items show
+  up on open POS screens immediately.
+
 **Thermal receipts:** `/[locale]/receipt/[id]` (a session's booking id or a counter sale's order id) is an 80mm layout
 (`@page { size: 80mm auto }`, 72mm printable). It is black on white, RTL in Arabic, and itemized with each payment
 method, cash given and change. While a session is still running it prints as a *provisional bill*. The POS prints it

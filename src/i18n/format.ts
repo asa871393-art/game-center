@@ -6,6 +6,11 @@ export function format(template: string, values: Record<string, string | number>
   return template.replace(/\{(\w+)\}/g, (match, key: string) => (key in values ? String(values[key]) : match));
 }
 
+/** Display name in the current language: English when available in the English UI, Arabic otherwise. */
+export function localName(locale: Locale, value: { name: string; nameEn?: string | null }): string {
+  return locale === "en" && value.nameEn ? value.nameEn : value.name;
+}
+
 export function formatNumber(locale: Locale, value: number): string {
   return new Intl.NumberFormat(localeMeta[locale].intl).format(value);
 }

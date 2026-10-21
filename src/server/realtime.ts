@@ -13,7 +13,7 @@ export const LOUNGE_EVENTS_CHANNEL = "lounge_events";
 export interface LoungeChange {
   type: "change";
   loungeId: string;
-  table: "Booking" | "Device" | "CanteenOrder" | "Shift";
+  table: "Booking" | "Device" | "CanteenOrder" | "Shift" | "MenuItem" | "MenuCategory";
   op: "INSERT" | "UPDATE" | "DELETE";
   id: string;
   status: string;

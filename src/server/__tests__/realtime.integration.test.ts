@@ -101,6 +101,18 @@ describe("lounge event hub (Postgres LISTEN/NOTIFY)", () => {
     }
   });
 
+  it("announces menu changes too (tables without a status column)", async () => {
+    const mine = collect(loungeId);
+    try {
+      const item = await prisma.menuItem.findFirstOrThrow({ where: { loungeId } });
+      await prisma.menuItem.update({ where: { id: item.id }, data: { isAvailable: !item.isAvailable } });
+      expect(await mine.next()).toMatchObject({ type: "change", loungeId, table: "MenuItem", op: "UPDATE", id: item.id, status: "" });
+      await prisma.menuItem.update({ where: { id: item.id }, data: { isAvailable: item.isAvailable } });
+    } finally {
+      mine.unsubscribe();
+    }
+  });
+
   it("stops delivering after unsubscribe", async () => {
     const mine = collect(loungeId);
     mine.unsubscribe();

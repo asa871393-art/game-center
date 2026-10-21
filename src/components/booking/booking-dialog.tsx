@@ -5,6 +5,7 @@ import Link from "next/link";
 import { usePathname, useRouter } from "next/navigation";
 import { useCallback, useEffect, useMemo, useState, useTransition } from "react";
 import { toast } from "sonner";
+import { MenuThumb } from "@/components/canteen/menu-icons";
 import { deviceTypeMeta } from "@/components/lounge/device-type";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -18,7 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
 import type { CheckoutMethod } from "@/generated/prisma/enums";
 import { useI18n } from "@/i18n/client";
-import { formatDuration, formatTime, money } from "@/i18n/format";
+import { formatDuration, formatTime, localName, money } from "@/i18n/format";
 import { quoteBooking, type Quote } from "@/lib/booking/pricing";
 import { getAvailableSlots, getDurationOptions, type Slot } from "@/lib/booking/schedule";
 import { addDays, toLocalIsoDate, zonedTimeToUtc, type IsoDate } from "@/lib/booking/time";
@@ -410,7 +411,9 @@ function TimeStep({
 function AddOnsStep({ lounge }: { lounge: LoungeDetails }) {
   const { dict, locale } = useI18n();
   const { addOns, setQuantity } = useBookingDraft();
-  const groups = Object.groupBy(lounge.menuItems, (m) => m.category);
+  const groups = lounge.menuCategories
+    .map((c) => ({ category: c, items: lounge.menuItems.filter((m) => m.menuCategoryId === c.id) }))
+    .filter((g) => g.items.length > 0);
 
   return (
     <div className="space-y-4">
@@ -418,19 +421,20 @@ function AddOnsStep({ lounge }: { lounge: LoungeDetails }) {
         <h3 className="font-semibold">{dict.booking.addOnsTitle}</h3>
         <p className="text-sm text-muted-foreground">{dict.booking.addOnsHint}</p>
       </div>
-      {Object.entries(groups).map(([group, items]) => (
-        <section key={group}>
-          <h4 className="mb-2 text-sm font-semibold text-muted-foreground">
-            {dict.menuCategory[group as keyof typeof dict.menuCategory]}
-          </h4>
+      {groups.map(({ category, items }) => (
+        <section key={category.id}>
+          <h4 className="mb-2 text-sm font-semibold text-muted-foreground">{localName(locale, category)}</h4>
           <ul className="divide-y rounded-xl border">
-            {items!.map((item) => {
+            {items.map((item) => {
               const qty = addOns[item.id] ?? 0;
               return (
                 <li key={item.id} className="flex items-center justify-between gap-3 p-3">
-                  <div className="min-w-0">
-                    <p className="truncate font-medium">{item.name}</p>
-                    <p className="text-sm text-muted-foreground">{money(locale, item.price, lounge.currency)}</p>
+                  <div className="flex min-w-0 items-center gap-3">
+                    <MenuThumb imageUrl={item.imageUrl} iconName={item.iconName} kind={item.category} />
+                    <div className="min-w-0">
+                      <p className="truncate font-medium">{localName(locale, item)}</p>
+                      <p className="text-sm text-muted-foreground">{money(locale, item.price, lounge.currency)}</p>
+                    </div>
                   </div>
                   {item.soldOut ? (
                     <Badge variant="outline">{dict.booking.soldOut}</Badge>
@@ -510,7 +514,7 @@ function CheckoutStep({
           {items.map((item) => (
             <div key={item.id} className="flex justify-between gap-4">
               <dt className="text-muted-foreground">
-                {item.name} × {item.quantity}
+                {localName(locale, item)} × {item.quantity}
               </dt>
               <dd className="tabular-nums">{fmt(item.price * item.quantity)}</dd>
             </div>

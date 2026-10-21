@@ -751,7 +751,7 @@ async function reserveLines(tx: Tx, loungeId: string, items: readonly OrderLineI
     if (!Number.isInteger(quantity) || quantity < 1 || quantity > MAX_ITEM_QUANTITY) throw new PosError("ITEM_UNAVAILABLE");
   }
 
-  const menu = await tx.menuItem.findMany({ where: { loungeId, id: { in: [...merged.keys()] }, isAvailable: true } });
+  const menu = await tx.menuItem.findMany({ where: { loungeId, id: { in: [...merged.keys()] }, isAvailable: true, archivedAt: null } });
   if (menu.length !== merged.size) throw new PosError("ITEM_UNAVAILABLE");
 
   const lines = menu.map((item) => {

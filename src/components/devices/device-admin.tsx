@@ -63,6 +63,9 @@ export function DeviceAdmin({ data }: { data: DeviceAdminData }) {
           <p className="text-sm text-muted-foreground">{data.lounge.name}</p>
         </div>
         <div className="ms-auto flex gap-2">
+          <Link href={href(`/pos/${data.lounge.id}/menu`)} className={buttonVariants({ variant: "ghost", size: "lg", className: "h-12" })}>
+            {dict.menuAdmin.title}
+          </Link>
           <Button size="lg" variant="secondary" className="h-12" onClick={() => setEditing({ kind: "category", category: null })}>
             <Plus aria-hidden /> {d.addCategory}
           </Button>

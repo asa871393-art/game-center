@@ -162,7 +162,7 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
   }
   const menuItems = addOns.length
     ? await prisma.menuItem.findMany({
-        where: { loungeId: lounge.id, id: { in: addOns.map((a) => a.menuItemId) }, isAvailable: true },
+        where: { loungeId: lounge.id, id: { in: addOns.map((a) => a.menuItemId) }, isAvailable: true, archivedAt: null },
       })
     : [];
   if (menuItems.length !== addOns.length) throw new BookingError("ITEM_UNAVAILABLE");

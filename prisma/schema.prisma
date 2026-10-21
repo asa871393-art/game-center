@@ -346,19 +346,20 @@ model Lounge {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  organization  Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  photos        LoungePhoto[]
-  openingHours  OpeningHours[]
-  members       LoungeMember[]
-  zones         FloorZone[]
-  categories    DeviceCategory[]
-  devices       Device[]
-  pricingRules  PricingRule[]
-  bookings      Booking[]
-  menuItems     MenuItem[]
-  canteenOrders CanteenOrder[]
-  transactions  Transaction[]
-  shifts        Shift[]
+  organization   Organization     @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  photos         LoungePhoto[]
+  openingHours   OpeningHours[]
+  members        LoungeMember[]
+  zones          FloorZone[]
+  categories     DeviceCategory[]
+  devices        Device[]
+  pricingRules   PricingRule[]
+  bookings       Booking[]
+  menuItems      MenuItem[]
+  menuCategories MenuCategory[]
+  canteenOrders  CanteenOrder[]
+  transactions   Transaction[]
+  shifts         Shift[]
 
   @@index([organizationId])
   @@index([city, status])
@@ -652,27 +653,61 @@ model SessionSegment {
 // Canteen / POS
 // -----------------------------------------------------------------------------
 
-model MenuItem {
-  id            String           @id @default(cuid())
-  loungeId      String
-  name          String
-  description   String?
-  category      MenuItemCategory
-  price         Decimal          @db.Decimal(12, 2)
-  imageUrl      String?
-  sku           String?
-  /// null = stock not tracked.
-  stockQuantity Int?
-  isAvailable   Boolean          @default(true)
-  sortOrder     Int              @default(0)
-  createdAt     DateTime         @default(now())
-  updatedAt     DateTime         @updatedAt
+/// A lounge's own menu section, e.g. "مشروبات باردة / Cold drinks".
+/// `kind` is the broad type, used for the default icon and reporting.
+model MenuCategory {
+  id        String           @id @default(cuid())
+  loungeId  String
+  /// Arabic (primary) and optional English display names.
+  name      String
+  nameEn    String?
+  kind      MenuItemCategory @default(OTHER)
+  sortOrder Int              @default(0)
+  createdAt DateTime         @default(now())
+  updatedAt DateTime         @updatedAt
 
-  lounge     Lounge             @relation(fields: [loungeId], references: [id], onDelete: Cascade)
-  orderItems CanteenOrderItem[]
+  lounge Lounge     @relation(fields: [loungeId], references: [id], onDelete: Cascade)
+  items  MenuItem[]
+
+  @@unique([loungeId, name])
+  @@index([loungeId, sortOrder])
+}
+
+model MenuItem {
+  id             String           @id @default(cuid())
+  loungeId       String
+  menuCategoryId String
+  /// Arabic (primary) and optional English names.
+  name           String
+  nameEn         String?
+  description    String?
+  /// Broad type, mirrored from the menu category's kind.
+  category       MenuItemCategory
+  price          Decimal          @db.Decimal(12, 2)
+  /// Purchase cost, for margin reporting; never shown to customers.
+  costPrice      Decimal?         @db.Decimal(12, 2)
+  imageUrl       String?
+  /// lucide icon name shown when there's no image.
+  iconName       String?
+  sku            String?
+  /// null = stock not tracked (e.g. fresh coffee).
+  stockQuantity  Int?
+  /// "Low stock" at or below this quantity.
+  lowStockAt     Int              @default(5)
+  isAvailable    Boolean          @default(true)
+  sortOrder      Int              @default(0)
+  /// Archived items keep their order history but leave the menu.
+  archivedAt     DateTime?
+  createdAt      DateTime         @default(now())
+  updatedAt      DateTime         @updatedAt
+
+  lounge       Lounge             @relation(fields: [loungeId], references: [id], onDelete: Cascade)
+  menuCategory MenuCategory       @relation(fields: [menuCategoryId], references: [id], onDelete: Restrict)
+  orderItems   CanteenOrderItem[]
 
   @@unique([loungeId, sku])
   @@index([loungeId, category, isAvailable])
+  @@index([menuCategoryId])
 }
 
 /// A canteen order. Usually attached to a Booking (pre-order or added to an

@@ -21,7 +21,7 @@ export function CanteenPanel({ now }: { now: Date }) {
   const serve = (orderId: string) =>
     run(() => markOrderServedAction({ locale, loungeId: data.lounge.id, orderId }), () => dict.manage.canteen.servedToast);
 
-  const lowStock = data.menuItems.filter((m) => m.stock !== null && m.stock <= 5);
+  const lowStock = data.menuItems.filter((m) => m.stock !== null && m.stock <= m.lowStockAt);
 
   return (
     <div className="grid gap-6 lg:grid-cols-[1fr_18rem]">

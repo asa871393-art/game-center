@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, CalendarClock, CheckCircle2, Coffee, Settings2, Wallet } from "lucide-react";
+import { Activity, CalendarClock, CheckCircle2, Coffee, Settings2, UtensilsCrossed, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -71,6 +71,11 @@ function Board() {
           {canManageDevices && (
             <Link href={href(`/pos/${data.lounge.id}/devices`)} className={buttonVariants({ variant: "outline", size: "sm" })}>
               <Settings2 aria-hidden /> {dict.devices.title}
+            </Link>
+          )}
+          {canManageDevices && (
+            <Link href={href(`/pos/${data.lounge.id}/menu`)} className={buttonVariants({ variant: "outline", size: "sm" })}>
+              <UtensilsCrossed aria-hidden /> {dict.menuAdmin.title}
             </Link>
           )}
         </div>
