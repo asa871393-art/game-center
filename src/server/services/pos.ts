@@ -1,5 +1,6 @@
 import "server-only";
 import type { BookingStatus, PriceTier, Prisma } from "@/generated/prisma/client";
+import { WALK_IN_MIN_MINUTES } from "@/lib/booking/duration-input";
 import { PRICING_STEP_MINUTES, type PricingRuleInput } from "@/lib/booking/pricing";
 import { findContainingWindow, type Interval } from "@/lib/booking/schedule";
 import { billableMinutes, pricePlay, tierBps, withDeviceRates, type PlayPricing, type PricedCategory } from "@/lib/booking/session-billing";
@@ -65,7 +66,8 @@ export interface PosContext {
 export const CHECK_IN_EARLY_MINUTES = 30;
 /** A confirmed booking can be marked no-show this many minutes after its start. */
 export const NO_SHOW_GRACE_MINUTES = 15;
-export const WALK_IN_MIN_MINUTES = 15;
+/** Shared with the start-session screen, which validates typed durations against it. */
+export { WALK_IN_MIN_MINUTES };
 export const EXTENSION_MAX_MINUTES = 4 * 60;
 /** How far back a checkout may freeze an open session's bill (the moment the cashier opened checkout). */
 export const BILL_UNTIL_MAX_AGE_MINUTES = 10;

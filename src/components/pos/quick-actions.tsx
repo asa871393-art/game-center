@@ -36,6 +36,15 @@ import { useI18n } from "@/i18n/client";
 import { formatDuration, formatTime, money } from "@/i18n/format";
 import { liveBill } from "@/lib/booking/live-bill";
 import { availableTiers, pricePlay, tierBps } from "@/lib/booking/session-billing";
+import {
+  clampInt,
+  DURATION_PRESETS,
+  MAX_FIXED_MINUTES,
+  parseDigits,
+  resolveDuration,
+  WALK_IN_MIN_MINUTES,
+} from "@/lib/booking/duration-input";
+import { PRICING_STEP_MINUTES } from "@/lib/booking/pricing";
 import { diffMinutes } from "@/lib/booking/time";
 import { cn } from "@/lib/utils";
 import {
@@ -58,7 +67,6 @@ import { nextRowKey, PaymentSplit, paymentsBalance, type PaymentRow } from "./pa
 import { printReceipt } from "./print";
 import { useBillContext, useDevicePricing, useLiveBill } from "./use-live-bill";
 
-const FIXED_OPTIONS = [30, 60, 90, 120, 180, 240];
 const EXTEND_OPTIONS = [30, 60];
 
 type View = "home" | "items" | "tier" | "transfer" | "checkout";
@@ -172,16 +180,26 @@ function StartSession({ device, now, onStarted }: { device: PosDevice; now: Date
   const cur = data.lounge.currency;
 
   const maxFree = device.freeUntil ? diffMinutes(new Date(device.freeUntil), now) : 0;
-  const fixedOptions = FIXED_OPTIONS.filter((m) => m <= maxFree);
+  // Longest fixed session that fits before the next booking / closing, on the server's step grid.
+  const maxFixed = Math.min(MAX_FIXED_MINUTES, Math.floor(maxFree / PRICING_STEP_MINUTES) * PRICING_STEP_MINUTES);
 
   const [mode, setMode] = useState<"OPEN" | "FIXED">("OPEN");
-  const [minutes, setMinutes] = useState(60);
-  const [tier, setTier] = useState<PriceTier>("SINGLE");
-  const [players, setPlayers] = useState(1);
+  const [preset, setPreset] = useState(60);
+  const [custom, setCustom] = useState("");
+  const [unit, setUnit] = useState<"MIN" | "HOUR">("MIN");
+  const [pickedTier, setPickedTier] = useState<PriceTier | null>(null);
+  const [playersText, setPlayersText] = useState("1");
   const [guest, setGuest] = useState("");
-  const chosenMinutes = fixedOptions.includes(minutes) ? minutes : (fixedOptions.at(-1) ?? 0);
 
-  if (!category.isActive || maxFree < 15) {
+  const capacity = Math.max(1, category.capacity);
+  const players = clampInt(parseDigits(playersText), 1, capacity) ?? 1;
+  // Until the cashier picks a tier, more than one player means the group (MULTI) rate where offered.
+  const autoTier: PriceTier = players > 1 && tiers.includes("MULTI") ? "MULTI" : "SINGLE";
+  const tier = pickedTier ?? autoTier;
+
+  const duration = resolveDuration({ preset, custom, unit, maxFixed });
+
+  if (!category.isActive || maxFree < WALK_IN_MIN_MINUTES) {
     return (
       <p className="rounded-2xl border border-dashed p-6 text-center text-muted-foreground">
         {device.freeUntil ? dict.manage.walkIn.noTime : dict.manage.closedNow}
@@ -192,7 +210,9 @@ function StartSession({ device, now, onStarted }: { device: PosDevice; now: Date
   const pricing = { timeZone: data.lounge.timezone, rules: data.pricingRules };
   // Rates right now, including time-of-day pricing rules.
   const hourlyFor = (t: PriceTier) => pricePlay(pricing, rates, t, now, 60);
-  const fixedPrice = mode === "FIXED" && chosenMinutes ? pricePlay(pricing, rates, tier, now, chosenMinutes) : 0;
+  const fixedMinutes = duration.error ? null : duration.minutes;
+  const fixedPrice = mode === "FIXED" && fixedMinutes ? pricePlay(pricing, rates, tier, now, fixedMinutes) : 0;
+  const setPlayers = (n: number) => setPlayersText(String(Math.max(1, Math.min(capacity, n))));
 
   const start = () =>
     run(
@@ -203,7 +223,7 @@ function StartSession({ device, now, onStarted }: { device: PosDevice; now: Date
           deviceId: device.id,
           mode,
           priceTier: tier,
-          durationMinutes: mode === "FIXED" ? chosenMinutes : undefined,
+          durationMinutes: mode === "FIXED" ? (fixedMinutes ?? undefined) : undefined,
           players,
           guestName: guest || undefined,
         }),
@@ -223,7 +243,7 @@ function StartSession({ device, now, onStarted }: { device: PosDevice; now: Date
             key={m}
             type="button"
             onClick={() => setMode(m)}
-            disabled={m === "FIXED" && fixedOptions.length === 0}
+            disabled={m === "FIXED" && maxFixed < WALK_IN_MIN_MINUTES}
             className={cn(
               "flex h-20 flex-col items-center justify-center gap-1 rounded-2xl border-2 text-base font-semibold transition disabled:opacity-40",
               mode === m ? "border-primary bg-primary/15" : "border-border",
@@ -237,32 +257,119 @@ function StartSession({ device, now, onStarted }: { device: PosDevice; now: Date
       </div>
 
       {mode === "FIXED" && (
-        <div className="grid grid-cols-3 gap-2 sm:grid-cols-6">
-          {fixedOptions.map((m) => (
-            <Button key={m} variant={chosenMinutes === m ? "default" : "outline"} className="h-12 text-base" onClick={() => setMinutes(m)}>
-              {formatDuration(locale, m, dict)}
-            </Button>
-          ))}
+        <div className="space-y-2">
+          <div className="grid grid-cols-4 gap-2">
+            {DURATION_PRESETS.map((m) => (
+              <Button
+                key={m}
+                variant={custom === "" && duration.minutes === m ? "default" : "outline"}
+                className="h-12 px-1 text-base"
+                disabled={m > maxFixed}
+                onClick={() => {
+                  setPreset(m);
+                  setCustom("");
+                }}
+              >
+                {formatDuration(locale, m, dict)}
+              </Button>
+            ))}
+          </div>
+          <div className={cn("flex gap-2 rounded-xl border-2 p-1.5 transition", custom !== "" ? "border-primary" : "border-transparent")}>
+            <label htmlFor="pos-custom-duration" className="flex shrink-0 items-center gap-1.5 ps-1.5 text-sm text-muted-foreground">
+              <Clock className="size-4" aria-hidden />
+              {dict.pos.duration.custom}
+            </label>
+            <Input
+              id="pos-custom-duration"
+              inputMode="decimal"
+              autoComplete="off"
+              className="h-11 min-w-0 flex-1 text-center text-lg font-semibold tabular-nums"
+              placeholder={dict.pos.duration.customPlaceholder}
+              value={custom}
+              maxLength={5}
+              aria-invalid={!!duration.error}
+              onFocus={(e) => e.currentTarget.select()}
+              onChange={(e) => setCustom(e.target.value.replace(/[^\d٠-٩۰-۹.,٫]/g, ""))}
+            />
+            <div className="grid shrink-0 grid-cols-2 gap-1 rounded-lg bg-muted p-1" role="group" aria-label={dict.pos.duration.title}>
+              {(["MIN", "HOUR"] as const).map((u) => (
+                <button
+                  key={u}
+                  type="button"
+                  aria-pressed={unit === u}
+                  onClick={() => setUnit(u)}
+                  className={cn(
+                    "h-9 rounded-md px-3 text-sm font-medium transition",
+                    unit === u ? "bg-background text-foreground shadow-sm" : "text-muted-foreground",
+                  )}
+                >
+                  {u === "MIN" ? dict.pos.duration.minutes : dict.pos.duration.hours}
+                </button>
+              ))}
+            </div>
+          </div>
+          <p className={cn("min-h-5 text-sm", duration.error ? "text-destructive" : "text-muted-foreground")} aria-live="polite">
+            {duration.error === "SHORT"
+              ? t(dict.pos.duration.tooShort, { min: formatDuration(locale, WALK_IN_MIN_MINUTES, dict) })
+              : duration.error === "LONG"
+                ? t(dict.pos.duration.tooLong, { max: formatDuration(locale, maxFixed, dict) })
+                : duration.minutes
+                  ? [
+                      duration.rounded && t(dict.pos.duration.rounded, { duration: formatDuration(locale, duration.minutes, dict) }),
+                      t(dict.pos.duration.endsAt, {
+                        time: formatTime(locale, new Date(now.getTime() + duration.minutes * 60_000), data.lounge.timezone),
+                      }),
+                    ]
+                      .filter(Boolean)
+                      .join(" · ")
+                  : t(dict.pos.duration.maxHint, { max: formatDuration(locale, maxFixed, dict) })}
+          </p>
         </div>
       )}
 
-      {tiers.length > 1 && <TierButtons tiers={tiers} value={tier} onChange={setTier} hourlyFor={hourlyFor} currency={cur} />}
+      {tiers.length > 1 && (
+        <div className="space-y-1.5">
+          <TierButtons tiers={tiers} value={tier} onChange={setPickedTier} hourlyFor={hourlyFor} currency={cur} />
+          {!pickedTier && tier === "MULTI" && <p className="text-xs text-primary">{dict.pos.multiAuto}</p>}
+        </div>
+      )}
 
       <div className="grid gap-3 sm:grid-cols-2">
-        <div className="flex items-center justify-between gap-3 rounded-xl border p-2">
-          <span className="ps-2 text-sm text-muted-foreground">{dict.booking.players}</span>
-          <div className="flex items-center gap-2">
-            <Button size="icon-lg" variant="outline" onClick={() => setPlayers((p) => Math.max(1, p - 1))} aria-label="−">
+        <div className="flex items-center justify-between gap-2 rounded-xl border p-2">
+          <label htmlFor="pos-players" className="ps-2 text-sm text-muted-foreground">
+            {dict.booking.players}
+            <span className="block text-xs">{t(dict.pos.playersHint, { max: capacity })}</span>
+          </label>
+          <div className="flex items-center gap-1.5">
+            <Button size="icon-lg" variant="outline" className="size-11" disabled={players <= 1} onClick={() => setPlayers(players - 1)} aria-label="−">
               <Minus />
             </Button>
-            <span className="w-6 text-center text-lg font-bold tabular-nums">{players}</span>
-            <Button size="icon-lg" variant="outline" onClick={() => setPlayers((p) => Math.min(category.capacity, p + 1))} aria-label="+">
+            <Input
+              id="pos-players"
+              inputMode="numeric"
+              autoComplete="off"
+              className="h-11 w-14 text-center text-lg font-bold tabular-nums"
+              value={playersText}
+              maxLength={2}
+              onFocus={(e) => e.currentTarget.select()}
+              onChange={(e) => setPlayersText(e.target.value.replace(/[^\d٠-٩۰-۹]/g, ""))}
+              // Show the clamped value once the cashier leaves the box.
+              onBlur={() => setPlayersText(String(players))}
+            />
+            <Button
+              size="icon-lg"
+              variant="outline"
+              className="size-11"
+              disabled={players >= capacity}
+              onClick={() => setPlayers(players + 1)}
+              aria-label="+"
+            >
               <Plus />
             </Button>
           </div>
         </div>
         <Input
-          className="h-12 text-base"
+          className="h-14 text-base sm:h-auto"
           placeholder={`${dict.manage.walkIn.guestName} (${dict.common.optional})`}
           value={guest}
           maxLength={80}
@@ -270,16 +377,29 @@ function StartSession({ device, now, onStarted }: { device: PosDevice; now: Date
         />
       </div>
 
-      <div className="flex items-center justify-between rounded-xl bg-muted/50 p-3">
+      <div className="flex items-center justify-between gap-3 rounded-xl bg-muted/50 p-3">
         <span className="text-sm text-muted-foreground">
-          {mode === "OPEN"
-            ? `${money(locale, hourlyFor(tier), cur)}${dict.common.perHour} · ${t(dict.pos.reservedUntil, { time: device.freeUntil ? formatTime(locale, device.freeUntil, data.lounge.timezone) : "" })}`
-            : dict.booking.playTime}
+          {mode === "OPEN" ? (
+            `${money(locale, hourlyFor(tier), cur)}${dict.common.perHour} · ${t(dict.pos.reservedUntil, { time: device.freeUntil ? formatTime(locale, device.freeUntil, data.lounge.timezone) : "" })}`
+          ) : (
+            <>
+              {dict.booking.playTime}
+              {fixedMinutes && (
+                <span className="block text-xs">
+                  {dict.pos.tier[tier]} · {formatDuration(locale, fixedMinutes, dict)}
+                </span>
+              )}
+            </>
+          )}
         </span>
-        {mode === "FIXED" && <span className="text-lg font-bold tabular-nums">{money(locale, fixedPrice, cur)}</span>}
+        {mode === "FIXED" && (
+          <span className="text-2xl font-bold tabular-nums" aria-live="polite">
+            {fixedMinutes ? money(locale, fixedPrice, cur) : "—"}
+          </span>
+        )}
       </div>
 
-      <Button size="lg" className="h-14 w-full text-lg" onClick={start} disabled={pending || (mode === "FIXED" && !chosenMinutes)}>
+      <Button size="lg" className="h-14 w-full text-lg" onClick={start} disabled={pending || (mode === "FIXED" && !fixedMinutes)}>
         {pending ? <Loader2 className="animate-spin" aria-hidden /> : <Play aria-hidden />}
         {dict.pos.start}
       </Button>
