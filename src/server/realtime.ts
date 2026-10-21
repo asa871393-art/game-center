@@ -160,4 +160,4 @@ class LoungeEventHub {
 
 // One hub per process, surviving dev hot reloads.
 const globalForHub = globalThis as unknown as { loungeEventHub?: LoungeEventHub };
-export const loungeEvents = (globalForHub.loungeEventHub ??= new LoungeEventHub(env.DATABASE_URL));
+export const loungeEvents = (globalForHub.loungeEventHub ??= new LoungeEventHub(env.DATABASE_URL_UNPOOLED ?? env.DATABASE_URL));

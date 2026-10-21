@@ -309,6 +309,22 @@ without keys, the login page shows the button disabled with a setup hint; in pro
   email was never verified (self-registration doesn't verify), its password is removed on linking, so someone who
   registered another person's address can't keep access. Staff and owners keep their roles and passwords.
 
+## Deploying (Netlify + hosted Postgres)
+
+`netlify.toml` builds with `npx prisma generate && npm run build`. The build never connects to the database, but the
+running site needs a Postgres reachable from the internet (Netlify DB, Neon, Supabase, Prisma Postgres, ...).
+
+1. Create the database and copy two connection strings, both ending in `?sslmode=require`:
+   - **pooled** (host usually contains `-pooler`, or port 6543 on Supabase) → `DATABASE_URL`
+   - **direct** → `DATABASE_URL_UNPOOLED`. Live POS updates hold a `LISTEN` connection and migrations take advisory
+     locks; neither works through a transaction-mode pooler.
+2. From your machine, with both variables pointing at the new database, run once (and after every new migration):
+   `npm run db:deploy`. Optionally `npm run db:seed` for the demo lounge and logins (it makes `player@gamelounge.dev`
+   a super admin, so don't seed a real production database).
+3. In Netlify → Site configuration → Environment variables set `DATABASE_URL`, `DATABASE_URL_UNPOOLED`,
+   `AUTH_SECRET`, `NEXT_PUBLIC_APP_URL` (your site URL), plus the Google and Firebase keys you use.
+4. For Google sign-in, add `https://<your-site>/api/auth/callback/google` to the OAuth client's redirect URIs.
+
 ## Layout
 
 ```
