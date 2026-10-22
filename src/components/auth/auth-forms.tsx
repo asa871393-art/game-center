@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { useI18n } from "@/i18n/client";
+import { cn } from "@/lib/utils";
 import {
   registerWithCredentials,
   signInWithCredentials,
@@ -122,33 +123,43 @@ export function SignUpForm({ callbackUrl }: { callbackUrl: string }) {
   );
 }
 
-export function GoogleSignInButton({ callbackUrl, className }: { callbackUrl: string; className?: string }) {
+export function GoogleSignInButton({
+  callbackUrl,
+  className,
+  label,
+  size,
+}: {
+  callbackUrl: string;
+  className?: string;
+  label?: string;
+  size?: "lg" | "xl";
+}) {
   const { dict, locale } = useI18n();
   return (
     <form action={signInWithGoogle} className={className}>
       <input type="hidden" name="locale" value={locale} />
       <input type="hidden" name="callbackUrl" value={callbackUrl} />
-      <GoogleSubmit label={dict.auth.continueWithGoogle} pendingLabel={dict.auth.redirectingToGoogle} />
+      <GoogleSubmit label={label ?? dict.auth.continueWithGoogle} pendingLabel={dict.auth.redirectingToGoogle} size={size} />
     </form>
   );
 }
 
-/** Shown in development when no Google keys are configured, so the missing setup is obvious. */
-export function GoogleSignInUnavailable() {
+/** Shown when no Google keys are configured, so the missing setup is obvious. */
+export function GoogleSignInUnavailable({ label, note, size }: { label?: string; note?: string; size?: "lg" | "xl" }) {
   const { dict } = useI18n();
   return (
     <div className="space-y-2">
-      <GoogleButtonFace label={dict.auth.continueWithGoogle} disabled />
+      <GoogleButtonFace label={label ?? dict.auth.continueWithGoogle} disabled size={size} />
       <p className="rounded-lg border border-dashed border-amber-500/50 bg-amber-500/10 p-2 text-xs text-amber-700 dark:text-amber-300">
-        {dict.auth.googleNotConfigured}
+        {note ?? dict.auth.googleNotConfigured}
       </p>
     </div>
   );
 }
 
-function GoogleSubmit({ label, pendingLabel }: { label: string; pendingLabel: string }) {
+function GoogleSubmit({ label, pendingLabel, size }: { label: string; pendingLabel: string; size?: "lg" | "xl" }) {
   const { pending } = useFormStatus();
-  return <GoogleButtonFace type="submit" label={pending ? pendingLabel : label} pending={pending} disabled={pending} />;
+  return <GoogleButtonFace type="submit" label={pending ? pendingLabel : label} pending={pending} disabled={pending} size={size} />;
 }
 
 /** Google-branded button: white face, official "G" mark. */
@@ -157,11 +168,14 @@ function GoogleButtonFace({
   pending = false,
   disabled,
   type = "button",
+  size = "lg",
 }: {
   label: string;
   pending?: boolean;
   disabled?: boolean;
   type?: "button" | "submit";
+  /** "xl" is the touchscreen size used on the cashier sign-in. */
+  size?: "lg" | "xl";
 }) {
   return (
     <Button
@@ -169,7 +183,10 @@ function GoogleButtonFace({
       size="lg"
       disabled={disabled}
       aria-busy={pending}
-      className="h-12 w-full gap-3 border border-zinc-300 bg-white text-base font-semibold text-zinc-800 shadow-sm hover:bg-zinc-50 disabled:opacity-70 dark:border-zinc-600"
+      className={cn(
+        "w-full gap-3 border border-zinc-300 bg-white font-semibold text-zinc-800 shadow-sm hover:bg-zinc-50 disabled:opacity-70 dark:border-zinc-600",
+        size === "xl" ? "h-16 rounded-2xl text-lg [&_svg]:size-6" : "h-12 text-base",
+      )}
     >
       {pending ? (
         <Loader2 className="size-5 animate-spin" aria-hidden />

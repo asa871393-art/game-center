@@ -10,6 +10,7 @@
     "typecheck": "next typegen && tsc --noEmit",
     "db:emulator": "firebase emulators:start --only firestore --project demo-gaming-lounge",
     "db:seed": "tsx --conditions=react-server scripts/seed-firestore.ts",
+    "staff:grant": "tsx --conditions=react-server scripts/grant-staff.ts",
     "firestore:deploy": "firebase deploy --only firestore:rules,firestore:indexes",
     "test": "vitest run",
     "test:watch": "vitest",

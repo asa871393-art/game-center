@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardList, History, LayoutDashboard, Settings2, ShoppingCart, UtensilsCrossed } from "lucide-react";
+import { ClipboardList, History, LayoutDashboard, Settings2, ShoppingCart, Users, UtensilsCrossed } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useState } from "react";
 import { toast } from "sonner";
@@ -125,6 +125,16 @@ function Terminal({ cashierName }: { cashierName: string }) {
           <Suspense>
             <LocaleSwitcher />
           </Suspense>
+          {canManageDevices && (
+            <Link
+              href={href(`/pos/${data.lounge.id}/staff`)}
+              className={buttonVariants({ variant: "ghost", size: "icon-lg" })}
+              title={dict.staffAdmin.link}
+            >
+              <Users aria-hidden />
+              <span className="sr-only">{dict.staffAdmin.link}</span>
+            </Link>
+          )}
           {canManageDevices && (
             <Link
               href={href(`/pos/${data.lounge.id}/shifts`)}

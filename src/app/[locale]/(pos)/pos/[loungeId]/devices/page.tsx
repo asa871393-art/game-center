@@ -4,8 +4,8 @@ import { Suspense } from "react";
 import { DeviceAdmin } from "@/components/devices/device-admin";
 import { ManagersOnly } from "@/components/pos/managers-only";
 import { Skeleton } from "@/components/ui/skeleton";
-import { localePath } from "@/i18n/config";
 import { getDictionary, getLocale } from "@/i18n/server";
+import { posLoginHref } from "@/lib/pos-login";
 import { getDeviceAdmin } from "@/server/queries/devices";
 import { getSession } from "@/server/session";
 import { getLoungeAccess, hasLoungeRole, loungeExists } from "@/server/staff";
@@ -28,7 +28,7 @@ export default function DevicesPage({ params }: PageProps<"/[locale]/pos/[lounge
 async function Devices({ loungeId }: { loungeId: string }) {
   const [locale, session] = await Promise.all([getLocale(), getSession()]);
   if (!session?.user?.id) {
-    redirect(`${localePath(locale, "/login")}?callbackUrl=${encodeURIComponent(localePath(locale, `/pos/${loungeId}/devices`))}`);
+    redirect(posLoginHref(locale, `/pos/${loungeId}/devices`));
   }
   // Managers and owners only. Anyone else signed in is told why and offered a switch of
   // account (lounges are public on the booking site, so this reveals nothing new).

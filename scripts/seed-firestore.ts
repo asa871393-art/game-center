@@ -8,6 +8,10 @@
  *
  * Re-running rebuilds each demo lounge from scratch. Never run it against a
  * production project: it creates accounts with a published password.
+ *
+ * SEED_STAFF_EMAILS="ali@gmail.com,sara@gmail.com" also makes those Google accounts cashiers
+ * (STAFF) at every demo lounge; they sign in with Gmail on /pos/login, no password.
+ * For a live database use `npm run staff:grant` instead.
  */
 import "dotenv/config";
 import bcrypt from "bcryptjs";
@@ -22,6 +26,7 @@ import {
   type InputJsonValue,
 } from "@/lib/db/types";
 import { db } from "@/server/db";
+import { grantLoungeAccess } from "@/server/services/staff-access";
 
 const DEMO_PASSWORD = "Password123!";
 
@@ -412,11 +417,18 @@ async function main() {
     { userId: staff.id, role: LoungeMemberRole.STAFF },
   ];
 
+  const staffEmails = (process.env.SEED_STAFF_EMAILS ?? "")
+    .split(",")
+    .map((e) => e.trim().toLowerCase())
+    .filter(Boolean);
+
   console.log("Seed complete.");
   for (const seed of LOUNGES) {
     const { lounge, deviceCount } = await seedLounge(org.id, seed, members);
     console.log(`  ${lounge.name.padEnd(18)} /${lounge.slug} · ${seed.city} · ${deviceCount} devices`);
+    for (const email of staffEmails) await grantLoungeAccess({ loungeId: lounge.id, actorId: null }, { email, role: "STAFF" });
   }
+  if (staffEmails.length) console.log(`  Gmail cashiers (sign in with Google on /pos/login): ${staffEmails.join(", ")}`);
   console.log(`  Logins (password "${DEMO_PASSWORD}"):`);
   for (const u of [superAdmin, owner, staff, customer]) console.log(`    ${u.role.padEnd(12)} ${u.email}`);
 }

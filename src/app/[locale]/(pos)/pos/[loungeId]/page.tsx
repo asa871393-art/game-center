@@ -4,11 +4,11 @@ import { Suspense } from "react";
 import { ManagersOnly } from "@/components/pos/managers-only";
 import { PosTerminal } from "@/components/pos/pos-terminal";
 import { Skeleton } from "@/components/ui/skeleton";
-import { localePath } from "@/i18n/config";
 import { getDictionary, getLocale } from "@/i18n/server";
+import { posLoginHref } from "@/lib/pos-login";
 import { getPosBoard } from "@/server/queries/manage";
 import { getSession } from "@/server/session";
-import { getLoungeAccess, hasLoungeRole, isStaffRole } from "@/server/staff";
+import { getLoungeAccess, getPlatformRole, hasLoungeRole, isStaffRole } from "@/server/staff";
 
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDictionary();
@@ -28,10 +28,17 @@ export default function PosTerminalPage({ params }: PageProps<"/[locale]/pos/[lo
 async function Terminal({ loungeId }: { loungeId: string }) {
   const [locale, session] = await Promise.all([getLocale(), getSession()]);
   if (!session?.user?.id) {
-    redirect(`${localePath(locale, "/login")}?callbackUrl=${encodeURIComponent(localePath(locale, `/pos/${loungeId}`))}`);
+    redirect(posLoginHref(locale, `/pos/${loungeId}`));
   }
-  if (!isStaffRole(session.user.role)) {
-    return <ManagersOnly locale={locale} email={session.user.email ?? ""} path={`/pos/${loungeId}`} />;
+  if (!isStaffRole((await getPlatformRole(session.user.id)) ?? undefined)) {
+    return (
+      <ManagersOnly
+        locale={locale}
+        email={session.user.email ?? ""}
+        path={`/pos/${loungeId}`}
+        viaGoogle={session.user.provider === "google"}
+      />
+    );
   }
   // Same response for "no such lounge" and "not yours", so ids can't be probed.
   const access = await getLoungeAccess(session.user.id, loungeId);

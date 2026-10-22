@@ -36,7 +36,8 @@ between runs; seed again after restarting it.
 | `test:integration` | Starts the Firestore emulator, seeds it, runs the booking, payment, POS, realtime and data-layer suites |
 | `typecheck` / `lint` / `build` | Static checks and production build (no Firebase credentials needed) |
 | `db:emulator` | Local Firestore emulator (port 8085) |
-| `db:seed` | Demo data into the configured project, or the emulator when `FIRESTORE_EMULATOR_HOST` is set |
+| `db:seed` | Demo data into the configured project, or the emulator when `FIRESTORE_EMULATOR_HOST` is set (`SEED_STAFF_EMAILS` adds Gmail cashiers) |
+| `staff:grant` | Gives a Google account cashier/manager access: `npm run staff:grant -- ali@gmail.com [--lounge <slug>] [--role MANAGER]`, or `-- --list` |
 | `firestore:deploy` | Deploys `firestore.rules` and `firestore.indexes.json` (`firebase login` first) |
 
 Integration tests never touch a real project: they refuse to start without `FIRESTORE_EMULATOR_HOST` and drop the
@@ -315,6 +316,24 @@ without keys, the login page shows the button disabled with a setup hint; in pro
 - If the email already has an account, Google is linked to it (only for Google-verified emails). When that account's
   email was never verified (self-registration doesn't verify), its password is removed on linking, so someone who
   registered another person's address can't keep access. Staff and owners keep their roles and passwords.
+
+### Cashier sign-in with Gmail
+
+Cashiers sign in at `/[locale]/pos/login` ("تسجيل الدخول للكاشير بواسطة Gmail"); every POS page sends signed-out
+visitors there. Access is granted per Gmail address, before the cashier ever signs in, in any of three ways:
+
+- **POS → Staff** (`/[locale]/pos/<loungeId>/staff`, managers and owners): enter the address and pick Cashier (or
+  Manager, owners only). The screen also shows the sign-in link to send the cashier.
+- **CLI** against the configured Firestore: `npm run staff:grant -- ali@gmail.com` (every lounge) or
+  `--lounge nexus-downtown`.
+- **Seed**: `SEED_STAFF_EMAILS="ali@gmail.com,sara@gmail.com" npm run db:seed` makes them cashiers at every demo lounge.
+
+Granting creates a password-less `STAFF` user for a new address (or promotes a customer account, dropping a password on
+an unverified one) plus the lounge membership. The first Google sign-in links to that user by email, so it keeps the
+`STAFF` role. Staff then land on the POS (the lounge itself when they work at one). Someone signed in with a Google
+account that has no staff access sees "حساب Gmail هذا لا يمتلك صلاحيات كاشير. يرجى التواصل مع المدير لمنح الصلاحية."
+The POS checks the role in the database, not the session, so granting or removing access applies on the next page load.
+On the regular login page, staff who sign in with no particular destination also go to the POS.
 
 ## Deploying (Netlify)
 

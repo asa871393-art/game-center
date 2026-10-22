@@ -13,7 +13,12 @@ import { db } from "@/server/db";
 
 declare module "next-auth" {
   interface Session {
-    user: { id: string; role: Role } & DefaultSession["user"];
+    user: {
+      id: string;
+      role: Role;
+      /** How this session signed in: "credentials" or "google". */
+      provider?: string;
+    } & DefaultSession["user"];
   }
   interface User {
     role?: Role;
@@ -24,6 +29,7 @@ declare module "next-auth/jwt" {
   interface JWT {
     id?: string;
     role?: Role;
+    provider?: string;
   }
 }
 
@@ -72,9 +78,10 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   providers,
   pages: { signIn: "/ar/login", error: "/ar/login" },
   callbacks: {
-    async jwt({ token, user, trigger }) {
+    async jwt({ token, user, account, trigger }) {
       if (user?.id) {
         token.id = user.id;
+        if (account) token.provider = account.provider;
         // OAuth users come from the adapter without our custom fields.
         token.role = user.role ?? (await db.user.findUnique({ where: { id: user.id }, select: { role: true } }))?.role;
       } else if (trigger === "update" && token.id) {
@@ -85,6 +92,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
     session({ session, token }) {
       if (token.id) session.user.id = token.id;
       session.user.role = token.role ?? "CUSTOMER";
+      if (token.provider) session.user.provider = token.provider;
       return session;
     },
     async signIn({ user, account, profile }) {

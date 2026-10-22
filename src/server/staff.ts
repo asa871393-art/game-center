@@ -18,6 +18,16 @@ export function isStaffRole(role: Role | undefined): boolean {
   return role !== undefined && STAFF_ROLES.includes(role);
 }
 
+/**
+ * The user's platform role from the database, or null for a missing or deactivated account.
+ * The POS gate uses this rather than the JWT so access granted (or revoked) by a manager
+ * applies on the next page load, without signing out and back in.
+ */
+export async function getPlatformRole(userId: string): Promise<Role | null> {
+  const user = await db.user.findUnique({ where: { id: userId }, select: { role: true, isActive: true } });
+  return user?.isActive ? user.role : null;
+}
+
 export function hasLoungeRole(access: LoungeAccess, min: LoungeMemberRole): boolean {
   return RANK[access.role] >= RANK[min];
 }

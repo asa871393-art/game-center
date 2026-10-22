@@ -10,6 +10,7 @@ import { localeMeta, localePath, type Locale } from "@/i18n/config";
 import type { Dictionary } from "@/i18n/dictionaries/ar";
 import { format, formatNumber, money } from "@/i18n/format";
 import { getDictionary, getLocale } from "@/i18n/server";
+import { posLoginHref } from "@/lib/pos-login";
 import type { ShiftType } from "@/lib/db/types";
 import { SHIFT_TYPES, shiftTypeEmoji } from "@/lib/shift-type";
 import { cn } from "@/lib/utils";
@@ -36,7 +37,7 @@ async function Shifts({ loungeId, type }: { loungeId: string; type?: ShiftType }
   const [locale, session] = await Promise.all([getLocale(), getSession()]);
   const path = `/pos/${loungeId}/shifts`;
   if (!session?.user?.id) {
-    redirect(`${localePath(locale, "/login")}?callbackUrl=${encodeURIComponent(localePath(locale, path))}`);
+    redirect(posLoginHref(locale, path));
   }
   // Cash variances per cashier are a manager matter, like the other admin screens.
   const access = await getLoungeAccess(session.user.id, loungeId);

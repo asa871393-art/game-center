@@ -48,7 +48,10 @@ export type PosErrorCode =
   | "HAS_UPCOMING_BOOKINGS"
   | "CATEGORY_IN_USE"
   | "INVALID_INPUT"
-  | "PAID_BOOKING";
+  | "PAID_BOOKING"
+  | "FORBIDDEN"
+  | "ACCOUNT_DISABLED"
+  | "CANNOT_REMOVE_SELF";
 
 export class PosError extends Error {
   constructor(public readonly code: PosErrorCode) {
