@@ -10,7 +10,9 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { useI18n } from "@/i18n/client";
 import { formatTime, money } from "@/i18n/format";
+import type { ShiftType } from "@/lib/db/types";
 import { toMinor, type Minor } from "@/lib/money";
+import { SHIFT_TYPES, shiftTypeAt, shiftTypeEmoji } from "@/lib/shift-type";
 import { cn } from "@/lib/utils";
 import { addShiftExpenseAction, closeShiftAction, openShiftAction, voidShiftExpenseAction } from "@/server/actions/pos";
 import type { PosBoardData } from "@/server/queries/manage";
@@ -33,7 +35,7 @@ function parseMoney(raw: string): Minor | null {
   }
 }
 
-/** Top-bar shift block: cashier, shift start and running time, live cash in drawer, and open/close actions. */
+/** Top-bar shift block: shift type, cashier, shift start and running time, live cash in drawer, and open/close actions. */
 export function ShiftBar({ now }: { now: Date }) {
   const { dict, locale } = useI18n();
   const { data } = usePos();
@@ -66,7 +68,8 @@ export function ShiftBar({ now }: { now: Date }) {
   return (
     <>
       <div className="flex items-center gap-3 rounded-xl border bg-card px-3 py-1.5">
-        <div className="text-xs leading-tight">
+        <ShiftTypeBadge type={shift.shiftType} />
+        <div className="border-s ps-3 text-xs leading-tight">
           <div className="font-semibold">{shift.cashier}</div>
           <div className="text-muted-foreground" suppressHydrationWarning>
             {dict.shift.since} {formatTime(locale, shift.openedAt, tz)}
@@ -225,60 +228,113 @@ function ExpenseForm({ shift, onDone }: { shift: ShiftData; onDone: () => void }
   );
 }
 
+/** "Current shift: morning 🌅" pill for the top bar. */
+function ShiftTypeBadge({ type }: { type: ShiftType }) {
+  const { dict } = useI18n();
+  return (
+    <div className="text-xs leading-tight">
+      <div className="text-muted-foreground">{dict.shift.current}</div>
+      <div
+        className={cn(
+          "mt-0.5 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-sm font-bold",
+          type === "MORNING" ? "bg-amber-400/20 text-amber-200" : "bg-indigo-400/20 text-indigo-200",
+        )}
+      >
+        {dict.shift.typeShort[type]} <span aria-hidden>{shiftTypeEmoji[type]}</span>
+      </div>
+    </div>
+  );
+}
+
 function OpenShiftDialog({ open, onOpenChange }: { open: boolean; onOpenChange: (o: boolean) => void }) {
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">{open && <OpenShiftForm onDone={() => onOpenChange(false)} />}</DialogContent>
+    </Dialog>
+  );
+}
+
+/** Mounted each time the dialog opens, so the suggested shift type matches the time it was opened. */
+function OpenShiftForm({ onDone }: { onDone: () => void }) {
   const { dict, locale } = useI18n();
   const { data } = usePos();
   const { pending, run } = usePosAction();
   const [float, setFloat] = useState<Minor>(0);
+  const [suggested] = useState<ShiftType>(() => shiftTypeAt(new Date(), data.lounge.timezone));
+  const [shiftType, setShiftType] = useState<ShiftType>(suggested);
   const cur = data.lounge.currency;
 
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md">
-        <DialogHeader>
-          <DialogTitle>{dict.shift.openTitle}</DialogTitle>
-          <DialogDescription>{dict.shift.openHint}</DialogDescription>
-        </DialogHeader>
-        <label className="space-y-1.5">
-          <span className="text-sm font-medium">{dict.shift.openingFloat}</span>
-          <Input
-            inputMode="decimal"
-            dir="ltr"
-            autoFocus
-            className="h-14 text-end text-2xl font-bold tabular-nums"
-            value={toInput(float)}
-            onChange={(e) => {
-              const v = parseMoney(e.target.value);
-              if (v !== null) setFloat(v);
-            }}
-          />
-        </label>
-        <div className="grid grid-cols-4 gap-2">
-          {FLOAT_PRESETS.map((v) => (
-            <Button key={v} variant={float === v ? "secondary" : "outline"} className="h-11 tabular-nums" onClick={() => setFloat(v)}>
-              {money(locale, v, cur)}
-            </Button>
+    <>
+      <DialogHeader>
+        <DialogTitle>{dict.shift.openTitle}</DialogTitle>
+        <DialogDescription>{dict.shift.openHint}</DialogDescription>
+      </DialogHeader>
+      <div className="space-y-1.5">
+        <div className="text-sm font-medium">{dict.shift.type}</div>
+        <div role="radiogroup" aria-label={dict.shift.type} className="grid grid-cols-2 gap-2">
+          {SHIFT_TYPES.map((type) => (
+            <button
+              key={type}
+              type="button"
+              role="radio"
+              aria-checked={shiftType === type}
+              onClick={() => setShiftType(type)}
+              className={cn(
+                "flex h-16 items-center justify-center gap-2 rounded-xl border-2 text-base font-bold transition-colors",
+                shiftType !== type && "border-border bg-card text-muted-foreground hover:bg-muted",
+                shiftType === type && type === "MORNING" && "border-amber-400 bg-amber-400/15 text-amber-100",
+                shiftType === type && type === "EVENING" && "border-indigo-400 bg-indigo-400/15 text-indigo-100",
+              )}
+            >
+              <span className="text-xl" aria-hidden>
+                {shiftTypeEmoji[type]}
+              </span>
+              {dict.shift.types[type]}
+            </button>
           ))}
         </div>
-        <Button
-          size="lg"
-          className="h-14 text-lg"
-          disabled={pending}
-          onClick={() =>
-            run(
-              () => openShiftAction({ locale, loungeId: data.lounge.id, openingFloat: float }),
-              () => {
-                onOpenChange(false);
-                return dict.shift.opened;
-              },
-            )
-          }
-        >
-          {pending ? <Loader2 className="animate-spin" aria-hidden /> : <Unlock aria-hidden />}
-          {dict.shift.open}
-        </Button>
-      </DialogContent>
-    </Dialog>
+        {shiftType === suggested && <p className="text-xs text-muted-foreground">{dict.shift.typeAuto}</p>}
+      </div>
+      <label className="space-y-1.5">
+        <span className="text-sm font-medium">{dict.shift.openingFloat}</span>
+        <Input
+          inputMode="decimal"
+          dir="ltr"
+          autoFocus
+          className="h-14 text-end text-2xl font-bold tabular-nums"
+          value={toInput(float)}
+          onChange={(e) => {
+            const v = parseMoney(e.target.value);
+            if (v !== null) setFloat(v);
+          }}
+        />
+      </label>
+      <div className="grid grid-cols-4 gap-2">
+        {FLOAT_PRESETS.map((v) => (
+          <Button key={v} variant={float === v ? "secondary" : "outline"} className="h-11 tabular-nums" onClick={() => setFloat(v)}>
+            {money(locale, v, cur)}
+          </Button>
+        ))}
+      </div>
+      <Button
+        size="lg"
+        className="h-14 text-lg"
+        disabled={pending}
+        onClick={() =>
+          run(
+            () => openShiftAction({ locale, loungeId: data.lounge.id, openingFloat: float, shiftType }),
+            () => {
+              onDone();
+              return dict.shift.opened;
+            },
+          )
+        }
+      >
+        {pending ? <Loader2 className="animate-spin" aria-hidden /> : <Unlock aria-hidden />}
+        {dict.shift.open} · {dict.shift.typeShort[shiftType]} {shiftTypeEmoji[shiftType]}
+      </Button>
+    </>
   );
 }
 
@@ -329,7 +385,7 @@ function CloseForm({ shift, onClosed }: { shift: ShiftData; onClosed: (r: CloseR
       <DialogHeader>
         <DialogTitle>{dict.shift.closeTitle}</DialogTitle>
         <DialogDescription>
-          {shift.cashier} · {dict.shift.since} {formatTime(locale, shift.openedAt, data.lounge.timezone)}
+          {dict.shift.types[shift.shiftType]} {shiftTypeEmoji[shift.shiftType]} · {shift.cashier} · {dict.shift.since} {formatTime(locale, shift.openedAt, data.lounge.timezone)}
         </DialogDescription>
       </DialogHeader>
 

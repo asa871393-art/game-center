@@ -5,6 +5,7 @@ import { ReceiptToolbar } from "@/components/pos/receipt-toolbar";
 import { localeMeta, localePath, type Locale } from "@/i18n/config";
 import type { Dictionary } from "@/i18n/dictionaries/ar";
 import { money } from "@/i18n/format";
+import { shiftTypeEmoji } from "@/lib/shift-type";
 import { getDictionary, getLocale } from "@/i18n/server";
 import { getSession } from "@/server/session";
 import { getShiftSummary, type ShiftSummary } from "@/server/services/shift";
@@ -85,9 +86,13 @@ function Report({ s, locale, dict }: { s: ShiftSummary; locale: Locale; dict: Di
           {dict.shift.reportTitle}
           {s.status === "OPEN" && ` (${dict.shift.stillOpen})`}
         </div>
+        <div className="mt-0.5 text-[14px] font-extrabold">
+          {dict.shift.types[s.shiftType]} {shiftTypeEmoji[s.shiftType]}
+        </div>
       </header>
       <Divider />
       <Line label={dict.shift.shiftNo} value={<span dir="ltr">{s.id.slice(-8).toUpperCase()}</span>} />
+      <Line label={dict.shift.type} value={dict.shift.typeShort[s.shiftType]} />
       <Line label={dict.pos.cashier} value={s.cashier} />
       <Line label={dict.shift.openedAt} value={dateTime(locale, s.openedAt, tz)} />
       {s.closedAt && <Line label={dict.shift.closedAt} value={dateTime(locale, s.closedAt, tz)} />}

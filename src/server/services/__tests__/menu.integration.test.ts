@@ -64,7 +64,7 @@ beforeAll(async () => {
   await cleanup();
   loungeId = (await db.lounge.findUniqueOrThrow({ where: { slug: SLUG } })).id;
   ownerId = (await db.user.findUniqueOrThrow({ where: { email: "owner@gamelounge.dev" } })).id;
-  await openShift(ctx(), { openingFloat: 0 });
+  await openShift(ctx(), { openingFloat: 0, shiftType: "MORNING" });
 });
 
 afterAll(async () => {

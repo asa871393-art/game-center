@@ -90,7 +90,7 @@ beforeAll(async () => {
   floorHeight = lounge.floorPlanHeight;
   ownerId = (await db.user.findUniqueOrThrow({ where: { email: "owner@gamelounge.dev" } })).id;
   customerId = (await db.user.create({ data: { email: CUSTOMER, name: "Devices Test" } })).id;
-  await openShift(ctxAt(), { openingFloat: 0 });
+  await openShift(ctxAt(), { openingFloat: 0, shiftType: "MORNING" });
 });
 
 afterAll(async () => {

@@ -1,6 +1,7 @@
 "use server";
 
 import { z } from "zod";
+import { SHIFT_TYPES } from "@/lib/shift-type";
 import { actionId as id, loungeScoped as base, runLoungeAction as run, type PosActionResult } from "./pipeline";
 import {
   addSessionOrder,
@@ -147,7 +148,7 @@ export async function cancelSessionOrderAction(payload: z.input<typeof orderSche
   });
 }
 
-const openShiftSchema = base.extend({ openingFloat: z.number().int().min(0) });
+const openShiftSchema = base.extend({ openingFloat: z.number().int().min(0), shiftType: z.enum(SHIFT_TYPES) });
 
 export async function openShiftAction(payload: z.input<typeof openShiftSchema>) {
   return run(openShiftSchema, payload, "STAFF", async (ctx, i) => {

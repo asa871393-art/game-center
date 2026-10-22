@@ -2053,6 +2053,10 @@ export const MODELS: Record<ModelName, ModelMeta> = {
           "value": "OPEN"
         }
       },
+      "shiftType": {
+        "type": "Enum",
+        "optional": true
+      },
       "openedAt": {
         "type": "DateTime",
         "default": {

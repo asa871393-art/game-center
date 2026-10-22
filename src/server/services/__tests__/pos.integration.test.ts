@@ -7,6 +7,7 @@ import { pricePlay } from "@/lib/booking/session-billing";
 import { getReceipt } from "@/server/queries/receipt";
 import { getLoungeAccess, hasLoungeRole } from "@/server/staff";
 import { createBooking } from "../booking";
+import { getShiftHistory } from "@/server/queries/shifts";
 import { addShiftExpense, closeShift, getShiftSummary, openShift, shiftCashNet, voidShiftExpense } from "../shift";
 import {
   addSessionOrder,
@@ -100,7 +101,7 @@ beforeAll(async () => {
   customerId = (await db.user.create({ data: { email: TEST_EMAIL, name: "POS Test Guest" } })).id;
   await db.menuItem.update({ where: { id: redBullId }, data: { stockQuantity: 10 } });
   // Counter payments need an open shift (the cash drawer).
-  shiftId = (await openShift({ loungeId, actorId: staffId }, { openingFloat: OPENING_FLOAT })).id;
+  shiftId = (await openShift({ loungeId, actorId: staffId }, { openingFloat: OPENING_FLOAT, shiftType: "EVENING" })).id;
 });
 
 afterAll(async () => {
@@ -536,7 +537,7 @@ describe("discounts and FastPay at checkout", () => {
 
 describe("cashier shift and cash drawer", () => {
   it("allows only one open shift per lounge", async () => {
-    await expectCode(openShift({ loungeId, actorId: staffId }, { openingFloat: 0 }), "SHIFT_ALREADY_OPEN");
+    await expectCode(openShift({ loungeId, actorId: staffId }, { openingFloat: 0, shiftType: "MORNING" }), "SHIFT_ALREADY_OPEN");
   });
 
   it("attaches every counter payment to the open shift and sums the drawer", async () => {
@@ -557,6 +558,23 @@ describe("cashier shift and cash drawer", () => {
     expect(summary.sessions).toBeGreaterThan(0);
     expect(summary.counterSales).toBeGreaterThan(0);
     expect(summary.discounts).toBeGreaterThan(0);
+  });
+
+  it("keeps the shift type and compares revenue by type in the history", async () => {
+    expect((await db.shift.findUniqueOrThrow({ where: { id: shiftId } })).shiftType).toBe("EVENING");
+    await expectCode(openShift({ loungeId, actorId: staffId }, { openingFloat: 0, shiftType: "NIGHT" as never }), "INVALID_INPUT");
+
+    const summary = (await getShiftSummary(shiftId))!;
+    expect(summary.shiftType).toBe("EVENING");
+    const history = (await getShiftHistory(loungeId))!;
+    expect(history.rows.find((r) => r.id === shiftId)).toMatchObject({ shiftType: "EVENING", gaming: summary.gaming, canteen: summary.canteen });
+    expect(history.byType.EVENING.shifts).toBeGreaterThanOrEqual(1);
+    expect(history.byType.EVENING.gaming).toBeGreaterThanOrEqual(summary.gaming);
+
+    const evening = (await getShiftHistory(loungeId, "EVENING"))!;
+    expect(evening.rows.every((r) => r.shiftType === "EVENING")).toBe(true);
+    expect(evening.rows.map((r) => r.id)).toContain(shiftId);
+    expect((await getShiftHistory(loungeId, "MORNING"))!.rows.map((r) => r.id)).not.toContain(shiftId);
   });
 
   it("splits drawer cash into gaming and canteen", async () => {

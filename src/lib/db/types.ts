@@ -133,6 +133,12 @@ export const ShiftStatus = {
 } as const;
 export type ShiftStatus = (typeof ShiftStatus)[keyof typeof ShiftStatus];
 
+export const ShiftType = {
+  MORNING: "MORNING",
+  EVENING: "EVENING",
+} as const;
+export type ShiftType = (typeof ShiftType)[keyof typeof ShiftType];
+
 export const CanteenOrderStatus = {
   PENDING: "PENDING",
   PREPARING: "PREPARING",
@@ -586,6 +592,8 @@ export interface Shift {
   loungeId: string;
   cashierId: string;
   status: ShiftStatus;
+  /** Morning or evening. Null only on shifts opened before shift types existed; see resolveShiftType. */
+  shiftType: ShiftType | null;
   openedAt: Date;
   closedAt: Date | null;
   closedById: string | null;

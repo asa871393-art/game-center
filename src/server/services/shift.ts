@@ -1,6 +1,7 @@
 import "server-only";
-import type { PaymentMethod } from "@/lib/db/types";
+import type { PaymentMethod, ShiftType } from "@/lib/db/types";
 import { fromMinor, toMinor, type Minor } from "@/lib/money";
+import { resolveShiftType, SHIFT_TYPES } from "@/lib/shift-type";
 import { db, isDbError, type TxClient, type DbReader } from "@/server/db";
 import { getOpenShift, PosError, type PosContext } from "./pos";
 
@@ -16,16 +17,18 @@ const MAX_FLOAT: Minor = 1_000_000_000; // 10,000,000.00
 type Db = TxClient | DbReader;
 
 
-export async function openShift(ctx: PosContext, input: { openingFloat: Minor }) {
+export async function openShift(ctx: PosContext, input: { openingFloat: Minor; shiftType: ShiftType }) {
   if (!Number.isInteger(input.openingFloat) || input.openingFloat < 0 || input.openingFloat > MAX_FLOAT) {
     throw new PosError("PAYMENT_MISMATCH");
   }
+  if (!SHIFT_TYPES.includes(input.shiftType)) throw new PosError("INVALID_INPUT");
   try {
     return await db.$transaction(async (tx) => {
       const shift = await tx.shift.create({
         data: {
           loungeId: ctx.loungeId,
           cashierId: ctx.actorId,
+          shiftType: input.shiftType,
           openingFloat: fromMinor(input.openingFloat),
           ...(ctx.now ? { openedAt: ctx.now } : {}),
         },
@@ -38,7 +41,7 @@ export async function openShift(ctx: PosContext, input: { openingFloat: Minor })
           action: "shift.open",
           entityType: "Shift",
           entityId: shift.id,
-          data: { openingFloat: input.openingFloat },
+          data: { openingFloat: input.openingFloat, shiftType: input.shiftType },
         },
       });
       return shift;
@@ -187,6 +190,7 @@ export interface ShiftSummary {
   loungeId: string;
   lounge: { name: string; timezone: string; currency: string };
   status: "OPEN" | "CLOSED";
+  shiftType: ShiftType;
   cashier: string;
   closedBy: string | null;
   openedAt: string;
@@ -272,6 +276,7 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
     loungeId: shift.loungeId,
     lounge: shift.lounge,
     status: shift.status,
+    shiftType: resolveShiftType(shift, shift.lounge.timezone),
     cashier: shift.cashier.name ?? shift.cashier.email ?? "",
     closedBy: shift.closedBy ? (shift.closedBy.name ?? shift.closedBy.email ?? "") : null,
     openedAt: shift.openedAt.toISOString(),

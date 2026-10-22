@@ -7,10 +7,13 @@ import { ManagersOnly } from "@/components/pos/managers-only";
 import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { localeMeta, localePath, type Locale } from "@/i18n/config";
+import type { Dictionary } from "@/i18n/dictionaries/ar";
 import { format, formatNumber, money } from "@/i18n/format";
 import { getDictionary, getLocale } from "@/i18n/server";
+import type { ShiftType } from "@/lib/db/types";
+import { SHIFT_TYPES, shiftTypeEmoji } from "@/lib/shift-type";
 import { cn } from "@/lib/utils";
-import { getShiftHistory, type ShiftHistory } from "@/server/queries/shifts";
+import { getShiftHistory, type ShiftHistory, type ShiftTypeTotals } from "@/server/queries/shifts";
 import { getSession } from "@/server/session";
 import { getLoungeAccess, hasLoungeRole, loungeExists } from "@/server/staff";
 
@@ -19,17 +22,17 @@ export async function generateMetadata(): Promise<Metadata> {
   return { title: dict.shift.history.title, robots: { index: false } };
 }
 
-export default function ShiftsPage({ params }: PageProps<"/[locale]/pos/[loungeId]/shifts">) {
+export default function ShiftsPage({ params, searchParams }: PageProps<"/[locale]/pos/[loungeId]/shifts">) {
   return (
     <Suspense fallback={<HistorySkeleton />}>
-      {params.then(({ loungeId }) => (
-        <Shifts loungeId={loungeId} />
+      {Promise.all([params, searchParams]).then(([{ loungeId }, sp]) => (
+        <Shifts loungeId={loungeId} type={SHIFT_TYPES.find((t) => t === sp.type)} />
       ))}
     </Suspense>
   );
 }
 
-async function Shifts({ loungeId }: { loungeId: string }) {
+async function Shifts({ loungeId, type }: { loungeId: string; type?: ShiftType }) {
   const [locale, session] = await Promise.all([getLocale(), getSession()]);
   const path = `/pos/${loungeId}/shifts`;
   if (!session?.user?.id) {
@@ -41,9 +44,9 @@ async function Shifts({ loungeId }: { loungeId: string }) {
     if (!(await loungeExists(loungeId))) notFound();
     return <ManagersOnly locale={locale} loungeId={loungeId} email={session.user.email ?? ""} path={path} />;
   }
-  const data = await getShiftHistory(loungeId);
+  const data = await getShiftHistory(loungeId, type);
   if (!data) notFound();
-  return <History data={data} locale={locale} />;
+  return <History data={data} locale={locale} type={type} />;
 }
 
 function dateTime(locale: Locale, iso: string, timeZone: string) {
@@ -57,10 +60,10 @@ function dateTime(locale: Locale, iso: string, timeZone: string) {
   }).format(new Date(iso));
 }
 
-async function History({ data, locale }: { data: ShiftHistory; locale: Locale }) {
+async function History({ data, locale, type }: { data: ShiftHistory; locale: Locale; type?: ShiftType }) {
   const dict = await getDictionary(locale);
   const h = dict.shift.history;
-  const { lounge, rows, totals } = data;
+  const { lounge, rows, totals, byType } = data;
   const m = (v: number) => money(locale, v, lounge.currency);
   const signed = (v: number) => `${v > 0 ? "+" : v < 0 ? "−" : ""}${m(Math.abs(v))}`;
   const Back = localeMeta[locale].dir === "rtl" ? ArrowRight : ArrowLeft;
@@ -76,7 +79,24 @@ async function History({ data, locale }: { data: ShiftHistory; locale: Locale })
           <h1 className="text-2xl font-bold">{h.title}</h1>
           <p className="text-sm text-muted-foreground">{lounge.name}</p>
         </div>
+        <nav aria-label={h.filter} className="flex rounded-xl border bg-card p-1">
+          {[undefined, ...SHIFT_TYPES].map((t) => (
+            <Link
+              key={t ?? "all"}
+              href={localePath(locale, `/pos/${lounge.id}/shifts${t ? `?type=${t}` : ""}`)}
+              aria-current={t === type ? "page" : undefined}
+              className={cn(
+                "rounded-lg px-3 py-2 text-sm font-medium transition-colors",
+                t === type ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-muted",
+              )}
+            >
+              {t ? `${shiftTypeEmoji[t]} ${dict.shift.typeShort[t]}` : h.all}
+            </Link>
+          ))}
+        </nav>
       </header>
+
+      <TypeComparison byType={byType} selected={type} locale={locale} currency={lounge.currency} dict={dict} />
 
       <section className="grid grid-cols-2 gap-2 sm:grid-cols-4">
         <Summary label={format(h.shifts, { count: formatNumber(locale, rows.length) })} value={m(totals.collected)} hint={h.collected} />
@@ -97,12 +117,13 @@ async function History({ data, locale }: { data: ShiftHistory; locale: Locale })
             <li
               key={r.id}
               className={cn(
-                "grid gap-3 rounded-2xl border bg-card p-3 sm:grid-cols-[1.4fr_repeat(4,1fr)_auto] sm:items-center",
+                "grid gap-3 rounded-2xl border bg-card p-3 sm:grid-cols-[1.4fr_repeat(5,1fr)_auto] sm:items-center",
                 r.status === "OPEN" && "border-amber-500/60",
               )}
             >
               <div className="min-w-0">
                 <div className="flex items-center gap-2 font-semibold">
+                  <ShiftTypePill type={r.shiftType} label={dict.shift.typeShort[r.shiftType]} />
                   {r.cashier}
                   {r.status === "OPEN" && <span className="rounded-full bg-amber-500/20 px-2 py-0.5 text-xs text-amber-300">{h.open}</span>}
                 </div>
@@ -112,6 +133,7 @@ async function History({ data, locale }: { data: ShiftHistory; locale: Locale })
                 </div>
               </div>
               <Cell label={h.collected} value={m(r.collected)} />
+              <Cell label={`${dict.receipt.gaming} / ${dict.receipt.canteen}`} value={m(r.gaming)} hint={m(r.canteen)} />
               <Cell label={dict.shift.cashExpenses} value={r.expensesTotal ? `−${m(r.expensesTotal)}` : "—"} />
               <Cell label={dict.shift.expected} value={m(r.expectedCash)} />
               <Cell
@@ -136,6 +158,101 @@ async function History({ data, locale }: { data: ShiftHistory; locale: Locale })
           ))}
         </ul>
       )}
+    </div>
+  );
+}
+
+function ShiftTypePill({ type, label }: { type: ShiftType; label: string }) {
+  return (
+    <span
+      className={cn(
+        "shrink-0 rounded-full px-2 py-0.5 text-xs font-bold",
+        type === "MORNING" ? "bg-amber-400/20 text-amber-300" : "bg-indigo-400/20 text-indigo-300",
+      )}
+    >
+      {shiftTypeEmoji[type]} {label}
+    </span>
+  );
+}
+
+/** Morning vs evening revenue side by side, split into gaming and canteen. */
+function TypeComparison({
+  byType,
+  selected,
+  locale,
+  currency,
+  dict,
+}: {
+  byType: Record<ShiftType, ShiftTypeTotals>;
+  selected?: ShiftType;
+  locale: Locale;
+  currency: string;
+  dict: Dictionary;
+}) {
+  const h = dict.shift.history;
+  const m = (v: number) => money(locale, v, currency);
+  const grand = SHIFT_TYPES.reduce((s, t) => s + byType[t].gaming + byType[t].canteen, 0);
+  const max = Math.max(1, ...SHIFT_TYPES.flatMap((t) => [byType[t].gaming, byType[t].canteen]));
+  const percent = new Intl.NumberFormat(localeMeta[locale].intl, { style: "percent" });
+  return (
+    <section className="rounded-2xl border bg-card p-4">
+      <h2 className="font-bold">{h.compareTitle}</h2>
+      <p className="mb-3 text-xs text-muted-foreground">{h.compareHint}</p>
+      <div className="grid gap-3 sm:grid-cols-2">
+        {SHIFT_TYPES.map((t) => {
+          const v = byType[t];
+          const total = v.gaming + v.canteen;
+          return (
+            <div
+              key={t}
+              className={cn(
+                "space-y-2 rounded-xl border p-3",
+                selected === t && (t === "MORNING" ? "border-amber-400/70 bg-amber-400/5" : "border-indigo-400/70 bg-indigo-400/5"),
+                selected && selected !== t && "opacity-60",
+              )}
+            >
+              <div className="flex items-center justify-between">
+                <span className="font-semibold">
+                  {shiftTypeEmoji[t]} {dict.shift.types[t]}
+                </span>
+                <span className="text-xs text-muted-foreground">{format(h.shifts, { count: formatNumber(locale, v.shifts) })}</span>
+              </div>
+              {v.shifts === 0 ? (
+                <p className="py-4 text-center text-sm text-muted-foreground">{h.none}</p>
+              ) : (
+                <>
+                  <Bar label={dict.receipt.gaming} value={m(v.gaming)} ratio={v.gaming / max} className="bg-violet-500" />
+                  <Bar label={dict.receipt.canteen} value={m(v.canteen)} ratio={v.canteen / max} className="bg-emerald-500" />
+                  <div className="flex justify-between border-t pt-2 text-sm">
+                    <span className="text-muted-foreground">{h.revenueTotal}</span>
+                    <span className="font-bold tabular-nums">{m(total)}</span>
+                  </div>
+                  <div className="flex justify-between text-xs text-muted-foreground">
+                    <span>
+                      {h.perShift}: <span className="tabular-nums">{m(Math.round(total / v.shifts))}</span>
+                    </span>
+                    {grand > 0 && <span>{format(h.share, { percent: percent.format(total / grand) })}</span>}
+                  </div>
+                </>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </section>
+  );
+}
+
+function Bar({ label, value, ratio, className }: { label: string; value: string; ratio: number; className: string }) {
+  return (
+    <div className="text-sm">
+      <div className="flex justify-between">
+        <span>{label}</span>
+        <span className="font-semibold tabular-nums">{value}</span>
+      </div>
+      <div className="mt-1 h-2 overflow-hidden rounded-full bg-muted">
+        <div className={cn("h-full rounded-full", className)} style={{ width: `${Math.round(ratio * 100)}%` }} />
+      </div>
     </div>
   );
 }
