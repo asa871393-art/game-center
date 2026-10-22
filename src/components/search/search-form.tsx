@@ -22,10 +22,13 @@ export function SearchForm({
   cities,
   initial = {},
   className,
+  inputId,
 }: {
   cities: string[];
   initial?: SearchValues;
   className?: string;
+  /** id for the text input, so other controls can focus it. */
+  inputId?: string;
 }) {
   const { dict, href } = useI18n();
   const router = useRouter();
@@ -63,6 +66,7 @@ export function SearchForm({
         <span className="sr-only">{dict.search.placeholder}</span>
         <Search className="pointer-events-none absolute start-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" aria-hidden />
         <Input
+          id={inputId}
           value={q}
           onChange={(e) => setQ(e.target.value)}
           placeholder={dict.search.placeholder}

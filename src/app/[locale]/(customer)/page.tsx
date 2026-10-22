@@ -1,7 +1,7 @@
-import { CalendarCheck, MapPinned, Search } from "lucide-react";
 import Link from "next/link";
 import { connection } from "next/server";
-import { Suspense } from "react";
+import { Suspense, type ComponentProps } from "react";
+import { HowItWorks } from "@/components/home/how-it-works";
 import { DEVICE_TYPES, deviceTypeMeta } from "@/components/lounge/device-type";
 import { LoungeCard } from "@/components/lounge/lounge-card";
 import { SearchForm } from "@/components/search/search-form";
@@ -9,15 +9,17 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { localePath } from "@/i18n/config";
 import { getDictionary, getLocale } from "@/i18n/server";
 import { getCities, searchLounges } from "@/server/queries/lounges";
+import { getSession } from "@/server/session";
 
 export default async function HomePage() {
   const locale = await getLocale();
   const dict = await getDictionary(locale);
-  const steps = [
-    { icon: Search, title: dict.home.step1Title, body: dict.home.step1Body },
-    { icon: MapPinned, title: dict.home.step2Title, body: dict.home.step2Body },
-    { icon: CalendarCheck, title: dict.home.step3Title, body: dict.home.step3Body },
+  const steps: Steps = [
+    { title: dict.home.step1Title, body: dict.home.step1Body },
+    { title: dict.home.step2Title, body: dict.home.step2Body },
+    { title: dict.home.step3Title, body: dict.home.step3Body },
   ];
+  const signInHref = `${localePath(locale, "/login")}?callbackUrl=${encodeURIComponent(localePath(locale, "/lounges"))}`;
 
   return (
     <main>
@@ -53,7 +55,7 @@ export default async function HomePage() {
         </ul>
       </section>
 
-      <section className="mx-auto w-full max-w-6xl px-4 pb-12">
+      <section id={stepTargets.loungesSectionId} className="mx-auto w-full max-w-6xl scroll-mt-20 px-4 pb-12">
         <div className="mb-4 flex items-center justify-between">
           <h2 className="text-xl font-bold">{dict.home.featured}</h2>
           <Link href={localePath(locale, "/lounges")} className="text-sm font-medium text-primary hover:underline">
@@ -68,22 +70,10 @@ export default async function HomePage() {
       <section className="border-t bg-muted/40">
         <div className="mx-auto w-full max-w-6xl px-4 py-12">
           <h2 className="mb-6 text-xl font-bold">{dict.home.howItWorks}</h2>
-          <ol className="grid gap-4 sm:grid-cols-3">
-            {steps.map(({ icon: Icon, title, body }, i) => (
-              <li key={title} className="flex gap-3 rounded-2xl border bg-card p-5">
-                <span className="grid size-10 shrink-0 place-items-center rounded-full bg-primary/10 font-bold text-primary">
-                  {i + 1}
-                </span>
-                <div>
-                  <p className="flex items-center gap-2 font-semibold">
-                    <Icon className="size-4" aria-hidden />
-                    {title}
-                  </p>
-                  <p className="text-sm text-muted-foreground">{body}</p>
-                </div>
-              </li>
-            ))}
-          </ol>
+          {/* Signed-out visitors' step 3 goes to sign-in, so the fallback assumes signed out. */}
+          <Suspense fallback={<HowItWorks steps={steps} {...stepTargets} signInHref={signInHref} />}>
+            <HowItWorksForViewer steps={steps} signInHref={signInHref} />
+          </Suspense>
         </div>
       </section>
     </main>
@@ -93,7 +83,17 @@ export default async function HomePage() {
 async function HeroSearch() {
   await connection();
   const cities = await getCities();
-  return <SearchForm cities={cities} />;
+  return <SearchForm cities={cities} inputId={stepTargets.searchInputId} />;
+}
+
+type Steps = ComponentProps<typeof HowItWorks>["steps"];
+
+/** Elements the how-it-works steps scroll to. */
+const stepTargets = { searchInputId: "home-search", loungesSectionId: "featured-lounges" };
+
+async function HowItWorksForViewer({ steps, signInHref }: { steps: Steps; signInHref: string }) {
+  const session = await getSession();
+  return <HowItWorks steps={steps} {...stepTargets} signInHref={session?.user ? undefined : signInHref} />;
 }
 
 async function FeaturedLounges() {
