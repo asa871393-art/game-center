@@ -50,7 +50,8 @@ function recordIndex(collection: string, plan: QueryPlan, order: OrderSpec | und
   const file = process.env.FIRESTORE_INDEX_LOG;
   if (!file) return;
   const eqFields = [...new Set([...plan.eq.map(([f]) => f), ...(plan.inFilter ? [plan.inFilter[0]] : [])])].filter((f) => f !== "id");
-  const rangeFields = [...new Set(plan.ranges.map(([f]) => f))];
+  // Firestore orders multiple inequality fields by name, and so must the index.
+  const rangeFields = [...new Set(plan.ranges.map(([f]) => f))].sort();
   const orderFields = (order ?? []).filter(([f]) => !rangeFields.includes(f));
   if (rangeFields.length + orderFields.length === 0) return;
   if (eqFields.length === 0 && rangeFields.length + orderFields.length <= 1) return;

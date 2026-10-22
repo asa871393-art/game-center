@@ -77,11 +77,11 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "scheduledStart",
+          "fieldPath": "scheduledEnd",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "scheduledEnd",
+          "fieldPath": "scheduledStart",
           "order": "ASCENDING"
         }
       ]
@@ -117,11 +117,11 @@
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "scheduledStart",
+          "fieldPath": "scheduledEnd",
           "order": "ASCENDING"
         },
         {
-          "fieldPath": "scheduledEnd",
+          "fieldPath": "scheduledStart",
           "order": "ASCENDING"
         }
       ]
