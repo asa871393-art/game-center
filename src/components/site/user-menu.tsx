@@ -12,7 +12,7 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import type { Role } from "@/generated/prisma/enums";
+import type { Role } from "@/lib/db/types";
 import { useI18n } from "@/i18n/client";
 import { signOutAction } from "@/server/actions/auth";
 

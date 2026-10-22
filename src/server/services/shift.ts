@@ -1,31 +1,27 @@
 import "server-only";
-import type { PaymentMethod, Prisma } from "@/generated/prisma/client";
+import type { PaymentMethod } from "@/lib/db/types";
 import { fromMinor, toMinor, type Minor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db, isDbError, type TxClient, type DbReader } from "@/server/db";
 import { getOpenShift, PosError, type PosContext } from "./pos";
 
 /**
  * Cashier shifts and the cash drawer. A lounge has one drawer, so at most one
- * OPEN shift (enforced by a partial unique index). Counter payments taken while
+ * OPEN shift (enforced by a partial unique key in the data layer). Counter payments taken while
  * it is open are attached to it; closing reconciles counted cash against
  * openingFloat + cash taken.
  */
 
 const MAX_FLOAT: Minor = 1_000_000_000; // 10,000,000.00
 
-type Db = Prisma.TransactionClient | typeof prisma;
+type Db = TxClient | DbReader;
 
-function isUniqueViolation(error: unknown): boolean {
-  const e = error as { code?: string; meta?: { driverAdapterError?: { cause?: { originalCode?: string } } } } | null;
-  return e?.code === "P2002" || e?.meta?.driverAdapterError?.cause?.originalCode === "23505" || String(error).includes("Shift_one_open_per_lounge");
-}
 
 export async function openShift(ctx: PosContext, input: { openingFloat: Minor }) {
   if (!Number.isInteger(input.openingFloat) || input.openingFloat < 0 || input.openingFloat > MAX_FLOAT) {
     throw new PosError("PAYMENT_MISMATCH");
   }
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await db.$transaction(async (tx) => {
       const shift = await tx.shift.create({
         data: {
           loungeId: ctx.loungeId,
@@ -48,7 +44,7 @@ export async function openShift(ctx: PosContext, input: { openingFloat: Minor })
       return shift;
     });
   } catch (error) {
-    if (isUniqueViolation(error)) throw new PosError("SHIFT_ALREADY_OPEN");
+    if (isDbError(error, "P2002")) throw new PosError("SHIFT_ALREADY_OPEN");
     throw error;
   }
 }
@@ -75,8 +71,8 @@ async function expectedCashOf(db: Db, shift: { id: string; openingFloat: { toStr
 }
 
 /** Serializes drawer changes (expenses, close) on one shift so the counted total can't race a payout. */
-async function lockShift(tx: Prisma.TransactionClient, shiftId: string) {
-  await tx.$executeRaw`SELECT 1 FROM "Shift" WHERE "id" = ${shiftId} FOR UPDATE`;
+async function lockShift(tx: TxClient, shiftId: string) {
+  await tx.$lock(`shift:${shiftId}`);
 }
 
 const MAX_REASON = 120;
@@ -86,7 +82,7 @@ export async function addShiftExpense(ctx: PosContext, input: { amount: Minor; r
   const reason = input.reason.trim();
   if (!Number.isInteger(input.amount) || input.amount <= 0 || input.amount > MAX_FLOAT) throw new PosError("INVALID_INPUT");
   if (!reason || reason.length > MAX_REASON) throw new PosError("INVALID_INPUT");
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const shift = await getOpenShift(tx, ctx.loungeId);
     if (!shift) throw new PosError("SHIFT_CLOSED");
     await lockShift(tx, shift.id);
@@ -119,7 +115,7 @@ export async function addShiftExpense(ctx: PosContext, input: { amount: Minor; r
 /** Cancels a mistaken expense while its shift is still open; it stays on record as voided. */
 export async function voidShiftExpense(ctx: PosContext, input: { expenseId: string }) {
   const now = ctx.now ?? new Date();
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const expense = await tx.shiftExpense.findFirst({
       where: { id: input.expenseId, loungeId: ctx.loungeId },
       include: { shift: { select: { status: true } } },
@@ -151,7 +147,7 @@ export async function closeShift(ctx: PosContext, input: { shiftId: string; coun
   if (!Number.isInteger(input.countedCash) || input.countedCash < 0 || input.countedCash > MAX_FLOAT * 10) {
     throw new PosError("PAYMENT_MISMATCH");
   }
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const shift = await tx.shift.findFirst({ where: { id: input.shiftId, loungeId: ctx.loungeId } });
     if (!shift) throw new PosError("NOT_FOUND");
     await lockShift(tx, shift.id);
@@ -219,7 +215,7 @@ export interface ShiftSummary {
 
 /** Figures for the open-shift bar, the close dialog and the printed report. Live for an open shift. */
 export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | null> {
-  const shift = await prisma.shift.findUnique({
+  const shift = await db.shift.findUnique({
     where: { id: shiftId },
     include: {
       lounge: { select: { name: true, timezone: true, currency: true } },
@@ -229,7 +225,7 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
   });
   if (!shift) return null;
 
-  const txs = await prisma.transaction.findMany({
+  const txs = await db.transaction.findMany({
     where: { shiftId, status: "SUCCEEDED", type: "PAYMENT" },
     select: { method: true, amount: true, bookingId: true, canteenOrderId: true },
   });
@@ -244,17 +240,17 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
   const bookingIds = [...new Set(txs.flatMap((t) => (t.bookingId ? [t.bookingId] : [])))];
   const orderIds = [...new Set(txs.flatMap((t) => (t.canteenOrderId ? [t.canteenOrderId] : [])))];
   const [bookings, orders] = await Promise.all([
-    prisma.booking.findMany({
+    db.booking.findMany({
       where: { id: { in: bookingIds } },
       select: { playSubtotal: true, canteenSubtotal: true, discountTotal: true, taxTotal: true },
     }),
-    prisma.canteenOrder.findMany({ where: { id: { in: orderIds } }, select: { subtotal: true, taxTotal: true } }),
+    db.canteenOrder.findMany({ where: { id: { in: orderIds } }, select: { subtotal: true, taxTotal: true } }),
   ]);
   const sum = <T,>(rows: T[], pick: (r: T) => { toString(): string }) => rows.reduce((s, r) => s + toMinor(pick(r)), 0);
 
   const [cash, expenseRows] = await Promise.all([
     cashByPurpose(shift.id),
-    prisma.shiftExpense.findMany({
+    db.shiftExpense.findMany({
       where: { shiftId: shift.id },
       orderBy: { createdAt: "asc" },
       include: { createdBy: { select: { name: true, email: true } } },
@@ -307,14 +303,14 @@ export async function getShiftSummary(shiftId: string): Promise<ShiftSummary | n
  * canteen subtotals. Anything else (no booking or order) counts as gaming. Sums to shiftCashNet.
  */
 async function cashByPurpose(shiftId: string): Promise<{ gaming: Minor; canteen: Minor }> {
-  const txs = await prisma.transaction.findMany({
+  const txs = await db.transaction.findMany({
     where: { shiftId, method: "CASH", status: "SUCCEEDED", type: { in: ["PAYMENT", "REFUND"] } },
     select: { type: true, amount: true, bookingId: true, canteenOrderId: true },
   });
   const bookingIds = [...new Set(txs.flatMap((t) => (t.bookingId && !t.canteenOrderId ? [t.bookingId] : [])))];
   const bookings = new Map(
     (
-      await prisma.booking.findMany({
+      await db.booking.findMany({
         where: { id: { in: bookingIds } },
         select: { id: true, playSubtotal: true, canteenSubtotal: true },
       })

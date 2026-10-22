@@ -1,4 +1,4 @@
-import type { CheckoutMethod } from "@/generated/prisma/client";
+import type { CheckoutMethod } from "@/lib/db/types";
 import type { Locale } from "@/i18n/config";
 import type { Minor } from "@/lib/money";
 

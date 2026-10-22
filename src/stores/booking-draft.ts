@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import type { CheckoutMethod } from "@/generated/prisma/enums";
+import type { CheckoutMethod } from "@/lib/db/types";
 import type { IsoDate } from "@/lib/booking/time";
 
 export type BookingStep = "time" | "addons" | "checkout";

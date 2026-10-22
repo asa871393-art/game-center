@@ -4,7 +4,7 @@ import { Loader2, Pause, Play } from "lucide-react";
 import { useTransition } from "react";
 import { toast } from "sonner";
 import { Button } from "@/components/ui/button";
-import type { LoungeStatus } from "@/generated/prisma/enums";
+import type { LoungeStatus } from "@/lib/db/types";
 import { useI18n } from "@/i18n/client";
 import { setLoungeStatusAction } from "@/server/actions/admin";
 

@@ -1,6 +1,6 @@
 import "server-only";
 import { applyBps, toMinor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/server/db";
 import { BLOCKING_STATUSES } from "./lounges";
 
 /** Absolute hourly rate of a tier from a single rate and a multiplier; null when the tier isn't offered. */
@@ -10,7 +10,7 @@ function tierRate(single: number, bps: number | null) {
 
 /** Everything the device management screen needs for one lounge, serializable. */
 export async function getDeviceAdmin(loungeId: string, now = new Date()) {
-  const lounge = await prisma.lounge.findUnique({
+  const lounge = await db.lounge.findUnique({
     where: { id: loungeId },
     select: {
       id: true,
@@ -29,8 +29,8 @@ export async function getDeviceAdmin(loungeId: string, now = new Date()) {
   if (!lounge) return null;
 
   const [active, upcoming, history] = await Promise.all([
-    prisma.booking.groupBy({ by: ["deviceId"], where: { loungeId, status: "ACTIVE" }, _count: { _all: true } }),
-    prisma.booking.groupBy({
+    db.booking.groupBy({ by: ["deviceId"], where: { loungeId, status: "ACTIVE" }, _count: { _all: true } }),
+    db.booking.groupBy({
       by: ["deviceId"],
       where: {
         loungeId,
@@ -40,7 +40,7 @@ export async function getDeviceAdmin(loungeId: string, now = new Date()) {
       },
       _count: { _all: true },
     }),
-    prisma.booking.groupBy({ by: ["deviceId"], where: { loungeId }, _count: { _all: true } }),
+    db.booking.groupBy({ by: ["deviceId"], where: { loungeId }, _count: { _all: true } }),
   ]);
   const count = (rows: { deviceId: string; _count: { _all: number } }[], id: string) =>
     rows.find((r) => r.deviceId === id)?._count._all ?? 0;

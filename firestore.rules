@@ -1,0 +1,59 @@
+rules_version = '2';
+
+// The Next.js server reads and writes Firestore through the Admin SDK, which
+// bypasses these rules. They only govern direct client-SDK access. Collections
+// not matched here (transactions, wallets, accounts, auditLogs, ...) are denied.
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function isSignedIn() { return request.auth != null; }
+    function getUserData() { return get(/databases/$(database)/documents/users/$(request.auth.uid)).data; }
+    function isOwner(userId) { return isSignedIn() && request.auth.uid == userId; }
+    function isSuperAdmin() { return isSignedIn() && getUserData().role == 'SUPER_ADMIN'; }
+    function isLoungeAdmin() { return isSignedIn() && (getUserData().role == 'LOUNGE_ADMIN' || getUserData().role == 'SUPER_ADMIN'); }
+    function isStaffOrAbove() {
+      return isSignedIn() && (
+        getUserData().role == 'STAFF' ||
+        getUserData().role == 'LOUNGE_ADMIN' ||
+        getUserData().role == 'SUPER_ADMIN'
+      );
+    }
+    // Fields a user may not set on their own profile.
+    function touchesPrivileged() {
+      return request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'isActive', 'passwordHash', 'email', 'emailVerified']);
+    }
+
+    match /users/{userId} {
+      // Profiles hold password hashes: only the user themself and staff can read them.
+      allow read: if isOwner(userId) || isStaffOrAbove();
+      // New profiles start as customers.
+      allow create: if isSignedIn() && isOwner(userId) && request.resource.data.role == 'CUSTOMER';
+      // Users edit their own profile but not their role; only super admins change roles.
+      allow update: if (isOwner(userId) && !touchesPrivileged()) || isSuperAdmin()
+                    || (isLoungeAdmin() && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['role', 'passwordHash']));
+      allow delete: if isSuperAdmin();
+    }
+    match /lounges/{loungeId} {
+      allow read: if true;
+      allow write: if isLoungeAdmin();
+    }
+    match /devices/{deviceId} {
+      allow read: if true;
+      allow create, delete: if isLoungeAdmin();
+      allow update: if isStaffOrAbove();
+    }
+    match /bookings/{bookingId} {
+      allow read: if isSignedIn();
+      allow create: if isSignedIn();
+      allow update, delete: if isStaffOrAbove();
+    }
+    match /menuItems/{itemId} {
+      allow read: if true;
+      allow create, update, delete: if isLoungeAdmin();
+    }
+    match /shifts/{shiftId} {
+      allow read: if isLoungeAdmin();
+      allow create, update: if isStaffOrAbove();
+      allow delete: if isSuperAdmin();
+    }
+  }
+}

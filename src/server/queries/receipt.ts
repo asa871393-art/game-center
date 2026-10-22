@@ -1,7 +1,7 @@
 import "server-only";
-import type { PaymentMethod, PriceTier, SessionMode } from "@/generated/prisma/client";
+import type { PaymentMethod, PriceTier, SessionMode } from "@/lib/db/types";
 import { toMinor, type Minor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/server/db";
 
 export interface ReceiptLine {
   kind: "play" | "extension" | "item";
@@ -57,7 +57,7 @@ function paymentsOf(rows: { method: PaymentMethod; amount: { toString(): string 
 
 /** Itemized receipt for a session (booking id) or a counter sale (canteen order id). Caller checks lounge access. */
 export async function getReceipt(id: string): Promise<Receipt | null> {
-  const booking = await prisma.booking.findUnique({
+  const booking = await db.booking.findUnique({
     where: { id },
     include: {
       lounge: { select: loungeSelect },
@@ -112,7 +112,7 @@ export async function getReceipt(id: string): Promise<Receipt | null> {
       ),
     );
     const cashierId = booking.transactions.at(-1)?.processedById ?? booking.createdById;
-    const cashier = cashierId ? await prisma.user.findUnique({ where: { id: cashierId }, select: { name: true } }) : null;
+    const cashier = cashierId ? await db.user.findUnique({ where: { id: cashierId }, select: { name: true } }) : null;
     return {
       kind: "session",
       id: booking.id,
@@ -139,7 +139,7 @@ export async function getReceipt(id: string): Promise<Receipt | null> {
     };
   }
 
-  const order = await prisma.canteenOrder.findUnique({
+  const order = await db.canteenOrder.findUnique({
     where: { id },
     include: {
       lounge: { select: loungeSelect },

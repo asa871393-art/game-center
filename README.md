@@ -5,44 +5,42 @@ customer booking, lounge POS/floor plan, and super-admin tenant management.
 Arabic (RTL) is the default language; English is included.
 
 **Stack:** Next.js 16 (App Router, Cache Components) · TypeScript · Tailwind v4 · shadcn/ui (Base UI, RTL) ·
-Prisma 7 (`@prisma/adapter-pg`) · PostgreSQL 17 · Zustand · Auth.js v5 · Vitest
+Firebase Firestore (Admin SDK) · Zustand · Auth.js v5 · Vitest
 
 ## Getting started
 
 ```bash
 cp .env.example .env          # then set AUTH_SECRET (npx auth secret)
 npm install
-npm run db:up                 # Postgres in Docker on localhost:5433
-npm run db:deploy             # apply migrations
+```
+
+Then either use a Firebase project (set `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`,
+`FIREBASE_PRIVATE_KEY` in `.env`, see [Firebase](#firebase)) or the local emulator (needs Java 21+):
+
+```bash
+npm run db:emulator           # Firestore emulator on 127.0.0.1:8085 (keep it running)
+# in .env: FIRESTORE_EMULATOR_HOST="127.0.0.1:8085"
 npm run db:seed               # 3 lounges (Baghdad ×2, Erbil), menus, 4 users
 npm run dev                   # http://localhost:3000 → redirects to /ar
 ```
 
 Demo logins (password `Password123!`): `admin@`, `owner@`, `staff@`, `player@gamelounge.dev`.
-`player@` is also a super admin, so it can manage every lounge's POS, devices and menu.
+`player@` is also a super admin, so it can manage every lounge's POS, devices and menu. The emulator keeps no data
+between runs; seed again after restarting it.
 
 ## Scripts
 
 | Script | Purpose |
 | --- | --- |
 | `test` | Unit tests (pricing, timezones, opening hours, business day, bill totals, money) |
-| `test:integration` | Booking, payment, POS and realtime (LISTEN/NOTIFY) against `TEST_DATABASE_URL` |
-| `typecheck` / `lint` / `build` | Static checks and production build |
-| `db:migrate` | Create + apply a migration from `schema.prisma` changes |
-| `db:reset` | Drop, re-migrate and re-seed the local database |
-| `db:studio` | Prisma Studio |
+| `test:integration` | Starts the Firestore emulator, seeds it, runs the booking, payment, POS, realtime and data-layer suites |
+| `typecheck` / `lint` / `build` | Static checks and production build (no Firebase credentials needed) |
+| `db:emulator` | Local Firestore emulator (port 8085) |
+| `db:seed` | Demo data into the configured project, or the emulator when `FIRESTORE_EMULATOR_HOST` is set |
+| `firestore:deploy` | Deploys `firestore.rules` and `firestore.indexes.json` (`firebase login` first) |
 
-### Integration test database (one-time)
-
-```bash
-docker compose exec postgres psql -U gaming -d postgres -c "CREATE DATABASE gaming_lounge_test"
-# PowerShell: $env:DATABASE_URL=...; bash: DATABASE_URL=... before each command
-DATABASE_URL="postgresql://gaming:gaming@localhost:5433/gaming_lounge_test" npx prisma migrate deploy
-DATABASE_URL="postgresql://gaming:gaming@localhost:5433/gaming_lounge_test" npx prisma db seed
-npm run test:integration
-```
-
-The setup refuses to run if `TEST_DATABASE_URL` equals `DATABASE_URL`.
+Integration tests never touch a real project: they refuse to start without `FIRESTORE_EMULATOR_HOST` and drop the
+service-account variables. The emulator needs a Java 21+ runtime on `PATH`.
 
 ## Customer features (Phase 2)
 
@@ -195,9 +193,9 @@ lounge can open a receipt.
 ## Realtime (Phase 4)
 
 ```
-Booking / Device / CanteenOrder row committed
-  → Postgres trigger  pg_notify('lounge_events', {loungeId, table, op, id, status, source})
-  → src/server/realtime.ts   one LISTEN connection per server process, fan-out by lounge
+Booking / Device / CanteenOrder / Shift / ShiftExpense / MenuItem / MenuCategory committed
+  → src/server/db (commit)   adds a loungeEvents doc {loungeId, table, op, id, status, source} in the same transaction
+  → src/server/realtime.ts   one Firestore listener per lounge with subscribers, fan-out in process
   → src/server/sse.ts        Server-Sent Events stream
   → useLiveEvents()          EventSource in the browser → debounced router.refresh()
 ```
@@ -206,14 +204,15 @@ Booking / Device / CanteenOrder row committed
   status, and shows a toast when an online booking arrives.
 - **Public feed** `GET /api/lounges/[slug]/events`: carries only `{scope: "availability"}`, never booking details. The
   lounge page uses it to refresh device statuses and the open booking dialog's free slots.
-- **Delivery:** NOTIFY is transactional, so rolled-back writes are never announced and identical events in one
-  transaction are merged. Every process LISTENs, so it works with several instances.
+- **Delivery:** events are written in the same transaction as the change, so rolled-back writes are never
+  announced, and no-op updates are skipped. Every instance listens, so it works with several instances. Event docs
+  carry an `expireAt` (1 day) with a TTL policy in `firestore.indexes.json`, so the collection stays small.
 - **Reconnects:** the hub retries with backoff and tells clients to `resync` after reconnecting. EventSource reconnects
   on its own, and each stream closes after 10 minutes so auth is re-checked.
 - **Fallback:** the board shows *Live*, *Connecting…* or *Polling*. Polling runs every 15 s while live updates are down
   and every 2 min as a safety net when they're up.
-- **Hosting:** each open board holds one HTTP connection. Behind nginx, `X-Accel-Buffering: no` is already set. The
-  trigger lives in `prisma/migrations/20261020160000_realtime_lounge_events`; keep it if you squash migrations.
+- **Hosting:** each open board holds one HTTP connection. Behind nginx, `X-Accel-Buffering: no` is already set. On
+  serverless hosts (Netlify) a stream lasts at most as long as the function, then EventSource reconnects.
 
 ## Platform admin
 
@@ -258,20 +257,28 @@ Settlement is idempotent: only the first result for a pending transaction counts
 hosted URL, and verify the signed callback in a route handler before calling `settlePayment()`. Return it from
 `getPaymentProvider()`. Set `PAYMENTS_MODE=disabled` to offer pay-at-lounge only.
 
-## Firebase (optional)
+## Firebase
 
-Everything Firebase is optional: with the `.env` values empty the app runs as before.
+Firestore is the database. The server talks to it only through the Admin SDK (`src/lib/firebase-admin.ts`), after
+the app's own permission checks; browsers never read Firestore directly.
 
 | File | Side | What it gives you |
 | --- | --- | --- |
-| `src/lib/firebase.ts` | client | `getFirebaseApp()`, `getFirebaseAuth()`, `getDb()` (Firestore), `getFirebaseStorage()`; lazy, reuses the app across hot reloads |
-| `src/lib/firebase-admin.ts` | server only | `getAdminApp()`, `getAdminAuth()`, `getAdminDb()`, `getAdminStorage()` from the service account |
+| `src/server/db/` | server only | `db`: the data layer every query, service and action uses (see [Data layer](#data-layer)) |
+| `src/lib/firebase-admin.ts` | server only | `getAdminApp()`, `getAdminAuth()`, `getAdminDb()`, `getAdminStorage()` from the service account, or the emulator |
+| `src/lib/firebase.ts` | client | `getFirebaseApp()`, `getFirebaseAuth()`, `getDb()`, `getFirebaseStorage()` (optional; unused by the app) |
 | `src/lib/firebase-storage.ts` | server only | `uploadProductImage(file, folderName): Promise<string>` |
 
-Setup: in the Firebase console, add a Web app and copy its config into the `NEXT_PUBLIC_FIREBASE_*` values; enable
-Storage (that gives the bucket name); under Project settings → Service accounts, generate a private key and copy its
-`client_email` and `private_key` into `FIREBASE_CLIENT_EMAIL` / `FIREBASE_PRIVATE_KEY` (one line, `\n` escapes, in
-double quotes). Restart `npm run dev`.
+Setup: create a project with Firestore (Native mode) and Storage. Under Project settings → Service accounts,
+generate a private key and copy `project_id`, `client_email` and `private_key` into `NEXT_PUBLIC_FIREBASE_PROJECT_ID`,
+`FIREBASE_CLIENT_EMAIL` and `FIREBASE_PRIVATE_KEY` (one line, `\n` escapes, in double quotes). Then deploy the rules
+and indexes (`npx firebase login`, `npx firebase use <project-id>`, `npm run firestore:deploy`) and seed if you want
+the demo data (`npm run db:seed`).
+
+**Security rules** (`firestore.rules`) only govern client-SDK access; the Admin SDK bypasses them. Users read and edit
+their own profile but can't change their role, active flag, email or password hash; only super admins change roles.
+Lounges, devices and menu items are publicly readable, everything not listed (transactions, wallets, accounts,
+audit logs, ...) is denied.
 
 **Menu photos.** With the Admin values and bucket set, the menu item form gets an "رفع صورة" (Upload image) button.
 The file goes to a manager-only Server Action, is checked by content (JPEG/PNG/WebP/GIF, no SVG) and size (5 MB;
@@ -309,34 +316,34 @@ without keys, the login page shows the button disabled with a setup hint; in pro
   email was never verified (self-registration doesn't verify), its password is removed on linking, so someone who
   registered another person's address can't keep access. Staff and owners keep their roles and passwords.
 
-## Deploying (Netlify + hosted Postgres)
+## Deploying (Netlify)
 
-`netlify.toml` builds with `npx prisma generate && npm run build`. The build never connects to the database, but the
-running site needs a Postgres reachable from the internet (Netlify DB, Neon, Supabase, Prisma Postgres, ...).
+`netlify.toml` builds with `npm run build`, which needs no database or Firebase secrets.
 
-1. Create the database and copy two connection strings, both ending in `?sslmode=require`:
-   - **pooled** (host usually contains `-pooler`, or port 6543 on Supabase) → `DATABASE_URL`
-   - **direct** → `DATABASE_URL_UNPOOLED`. Live POS updates hold a `LISTEN` connection and migrations take advisory
-     locks; neither works through a transaction-mode pooler.
-2. From your machine, with both variables pointing at the new database, run once (and after every new migration):
-   `npm run db:deploy`. Optionally `npm run db:seed` for the demo lounge and logins (it makes `player@gamelounge.dev`
-   a super admin, so don't seed a real production database).
-3. In Netlify → Site configuration → Environment variables set `DATABASE_URL`, `DATABASE_URL_UNPOOLED`,
-   `AUTH_SECRET`, `NEXT_PUBLIC_APP_URL` (your site URL), plus the Google and Firebase keys you use.
-4. For Google sign-in, add `https://<your-site>/api/auth/callback/google` to the OAuth client's redirect URIs.
+1. Set up the Firebase project as in [Firebase](#firebase), including `npm run firestore:deploy`. A query whose
+   composite index is missing fails with a Firestore error containing a link that creates it.
+2. In Netlify → Site configuration → Environment variables set `AUTH_SECRET`, `NEXT_PUBLIC_APP_URL` (your site URL),
+   `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, plus the storage bucket and
+   Google keys you use.
+3. For Google sign-in, add `https://<your-site>/api/auth/callback/google` to the OAuth client's redirect URIs.
+
+Don't run `db:seed` against a production project: it creates `player@gamelounge.dev` as a super admin with a published
+password.
 
 ## Layout
 
 ```
-prisma/                    schema, migrations (init has hand-written constraints at the bottom), seed
+scripts/                   seed-firestore.ts (demo data), firestore-indexes.mjs (index file from logged queries)
+firestore.rules           client-access rules; firebase.json, firestore.indexes.json
 src/proxy.ts               locale redirect
 src/auth.ts                Auth.js config (credentials + optional Google, JWT sessions with role)
 src/app/[locale]/          root layout (lang/dir), (customer) pages, (manager), (admin)
 src/app/api/               auth handlers, lounge availability, live event streams (SSE)
 src/components/            ui/ (shadcn), site/, search/, lounge/, booking/, auth/, manage/ (POS board)
+src/lib/db/                model types and enums (types.ts), Decimal (shared with Client Components)
 src/lib/booking/           pure, unit-tested: time.ts, schedule.ts (hours, slots, business day), pricing.ts, totals.ts
-src/server/                queries/, services/ (booking.ts, pos.ts), actions/, payments/, session.ts, staff.ts,
-                           realtime.ts (LISTEN hub), sse.ts
+src/server/                db/ (Firestore data layer), queries/, services/ (booking.ts, pos.ts), actions/, payments/,
+                           session.ts, staff.ts, auth-adapter.ts, realtime.ts (Firestore listener hub), sse.ts
 src/hooks/                 use-live-events.ts (EventSource + debounced refresh)
 src/stores/                Zustand booking draft
 ```
@@ -346,11 +353,32 @@ src/stores/                Zustand booking draft
 - **Tenancy:** `Organization` (tenant, commission rate, subscriptions, payouts) → `Lounge` → devices, menu, bookings.
   The platform role is `User.role`; per-lounge access is `LoungeMember` (OWNER / MANAGER / STAFF).
 - **A session is a `Booking`.** Walk-ins use `source = WALK_IN`. "Extend +1hr" writes a `BookingExtension`.
-- **No double booking:** a Postgres `EXCLUDE USING gist` constraint rejects overlapping
-  `PENDING | CONFIRMED | ACTIVE` bookings on the same device. Ranges are half-open, so back-to-back slots are allowed.
-  The service maps the violation to a friendly "slot just taken" error.
+- **No double booking:** the data layer rejects overlapping `PENDING | CONFIRMED | ACTIVE` bookings on the same
+  device at commit, holding a per-device lock document so concurrent transactions serialize. Ranges are half-open, so
+  back-to-back slots are allowed. The service maps the violation to a friendly "slot just taken" error.
 - **Opening hours** that close at or before they open run past midnight; after-midnight slots belong to the
   previous business day.
 - **Pricing:** `DeviceCategory.baseHourlyRate`, overridden per 5-minute step by the highest-priority matching
   `PricingRule` (fixed `hourlyRate` or `multiplierBps`). Prices are snapshotted onto the booking.
-- **Money** is `Decimal(12,2)` in the DB and integer minor units in code. Rates and commissions are basis points.
+- **Money** is stored as a number with at most two decimals, read back as `Decimal`, and handled as integer minor
+  units in code. Rates and commissions are basis points.
+
+## Data layer
+
+`src/server/db` is a small typed client over the Firebase Admin SDK with the call shapes the services were written
+against: `db.booking.findMany({ where, include, select, orderBy, take })`, `create`, `update`, `updateMany`,
+`deleteMany`, `count`, `aggregate`, `groupBy`, and `db.$transaction(async (tx) => ...)`.
+
+- **Collections:** `users`, `lounges`, `devices`, `bookings`, `menuItems`, `shifts`, plus `deviceCategories`,
+  `pricingRules`, `sessionSegments`, `bookingExtensions`, `canteenOrders`, `canteenOrderItems`, `menuCategories`,
+  `transactions`, `wallets`, `shiftExpenses`, `organizations`, `subscriptions`, `loungeMembers`, `openingHours`,
+  `floorZones`, `loungePhotos`, `payouts`, `auditLogs`, `accounts` (Auth.js), and `loungeEvents` (realtime). Model
+  fields, defaults, relations and unique keys are in `src/lib/db/types.ts` and `src/server/db/schema.ts`.
+- **Transactions** buffer their writes until commit, so code can read after it writes and sees its own changes.
+  Commit enforces what Postgres used to: unique keys (claimed as `_uniques` documents), one open shift per lounge,
+  one running segment per session, check constraints, the booking overlap rule, and foreign-key style deletes
+  (cascade / set null / refuse). Concurrent transactions on the same key retry or fail like the SQL versions did.
+- **Queries** push equality, `in` and range filters down to Firestore and evaluate the rest (OR, `not`, relation
+  filters, case-insensitive matches) in memory. Composite indexes are listed in `firestore.indexes.json`; run with
+  `FIRESTORE_INDEX_LOG=<file>` to log the indexes new queries need and `node scripts/firestore-indexes.mjs <file>` to
+  merge them.

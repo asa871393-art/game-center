@@ -8,13 +8,13 @@ import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import type { LoungeStatus } from "@/generated/prisma/enums";
+import type { LoungeStatus } from "@/lib/db/types";
 import { localePath, type Locale } from "@/i18n/config";
 import type { Dictionary } from "@/i18n/dictionaries/ar";
 import { format, formatDate, formatNumber, money } from "@/i18n/format";
 import { getDictionary, getLocale } from "@/i18n/server";
 import { cn } from "@/lib/utils";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/server/db";
 import { getPlatformOverview, type PlatformOverview } from "@/server/queries/admin";
 import { getSession } from "@/server/session";
 
@@ -48,7 +48,7 @@ async function Overview() {
     redirect(`${localePath(locale, "/login")}?callbackUrl=${encodeURIComponent(localePath(locale, "/admin"))}`);
   }
   // The JWT role can be stale; the database decides.
-  const user = await prisma.user.findUnique({ where: { id: session.user.id }, select: { role: true, isActive: true } });
+  const user = await db.user.findUnique({ where: { id: session.user.id }, select: { role: true, isActive: true } });
   if (user?.role !== "SUPER_ADMIN" || !user.isActive) notFound();
 
   const [dict, data] = await Promise.all([getDictionary(locale), getPlatformOverview()]);

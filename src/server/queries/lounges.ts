@@ -1,10 +1,10 @@
 import "server-only";
-import type { DeviceType, Prisma } from "@/generated/prisma/client";
+import type { DeviceType } from "@/lib/db/types";
 import type { PricingRuleInput } from "@/lib/booking/pricing";
 import { getOpeningWindow, type Interval } from "@/lib/booking/schedule";
 import type { IsoDate } from "@/lib/booking/time";
 import { toMinor, type Minor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db, type GetPayload, type Select } from "@/server/db";
 
 /** Booking statuses that occupy a device (mirrors the DB exclusion constraint). */
 export const BLOCKING_STATUSES = ["PENDING", "CONFIRMED", "ACTIVE"] as const;
@@ -41,9 +41,9 @@ const summarySelect = {
     where: { isActive: true },
     select: { type: true, baseHourlyRate: true, _count: { select: { devices: { where: { archivedAt: null } } } } },
   },
-} satisfies Prisma.LoungeSelect;
+} satisfies Select<"Lounge">;
 
-function toSummary(l: Prisma.LoungeGetPayload<{ select: typeof summarySelect }>): LoungeSummary {
+function toSummary(l: GetPayload<"Lounge", { select: typeof summarySelect }>): LoungeSummary {
   const rates = l.categories.map((c) => toMinor(c.baseHourlyRate));
   return {
     id: l.id,
@@ -60,7 +60,7 @@ function toSummary(l: Prisma.LoungeGetPayload<{ select: typeof summarySelect }>)
 }
 
 export async function searchLounges(filters: LoungeSearchFilters, take = 30): Promise<LoungeSummary[]> {
-  const lounges = await prisma.lounge.findMany({
+  const lounges = await db.lounge.findMany({
     where: {
       status: "ACTIVE",
       ...(filters.city ? { city: { equals: filters.city, mode: "insensitive" } } : {}),
@@ -75,7 +75,7 @@ export async function searchLounges(filters: LoungeSearchFilters, take = 30): Pr
 }
 
 export async function getCities(): Promise<string[]> {
-  const rows = await prisma.lounge.findMany({
+  const rows = await db.lounge.findMany({
     where: { status: "ACTIVE" },
     distinct: ["city"],
     select: { city: true },
@@ -85,7 +85,7 @@ export async function getCities(): Promise<string[]> {
 }
 
 export async function getLoungeDetails(slug: string) {
-  const lounge = await prisma.lounge.findFirst({
+  const lounge = await db.lounge.findFirst({
     where: { slug, status: "ACTIVE" },
     include: {
       photos: { orderBy: { sortOrder: "asc" } },
@@ -189,7 +189,7 @@ export interface DayAvailability {
 }
 
 export async function getDayAvailability(slug: string, date: IsoDate): Promise<DayAvailability | null> {
-  const lounge = await prisma.lounge.findFirst({
+  const lounge = await db.lounge.findFirst({
     where: { slug, status: "ACTIVE" },
     select: { id: true, timezone: true, openingHours: true },
   });
@@ -198,7 +198,7 @@ export async function getDayAvailability(slug: string, date: IsoDate): Promise<D
   const window = getOpeningWindow(date, lounge.openingHours, lounge.timezone);
   if (!window) return { date, window: null, busy: {} };
 
-  const bookings = await prisma.booking.findMany({
+  const bookings = await db.booking.findMany({
     where: {
       loungeId: lounge.id,
       status: { in: [...BLOCKING_STATUSES] },

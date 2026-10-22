@@ -1,5 +1,5 @@
 import "server-only";
-import type { CheckoutMethod } from "@/generated/prisma/client";
+import type { CheckoutMethod } from "@/lib/db/types";
 import { env } from "@/lib/env";
 import { createSandboxProvider } from "./sandbox";
 import type { OnlineCheckoutMethod, PaymentProvider } from "./types";

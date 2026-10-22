@@ -9,7 +9,7 @@ import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } f
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import type { DeviceType } from "@/generated/prisma/enums";
+import type { DeviceType } from "@/lib/db/types";
 import { useI18n } from "@/i18n/client";
 import type { Minor } from "@/lib/money";
 import { cn } from "@/lib/utils";

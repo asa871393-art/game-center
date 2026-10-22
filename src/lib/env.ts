@@ -9,12 +9,6 @@ const optionalString = z
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  DATABASE_URL: z.url(),
-  /**
-   * Direct (non-pooled) connection for LISTEN/NOTIFY. Hosted Postgres (Neon, Supabase, Netlify DB)
-   * hands out a transaction-mode pooler URL that can't hold a LISTEN; falls back to DATABASE_URL.
-   */
-  DATABASE_URL_UNPOOLED: optionalString.pipe(z.url().optional()),
   AUTH_SECRET: z.string().min(32, "AUTH_SECRET must be at least 32 characters"),
   /** Google OAuth is enabled only when both are set (GOOGLE_CLIENT_* or Auth.js's AUTH_GOOGLE_* names). */
   GOOGLE_CLIENT_ID: optionalString,
@@ -22,7 +16,10 @@ const envSchema = z.object({
   AUTH_GOOGLE_ID: optionalString,
   AUTH_GOOGLE_SECRET: optionalString,
   NEXT_PUBLIC_APP_URL: z.url().default("http://localhost:3000"),
-  /** Firebase (optional). Admin SDK = project id + service-account email + private key; uploads also need the bucket. */
+  /**
+   * Firebase. Firestore is the database: the Admin SDK needs project id + service-account email + private key
+   * at runtime (or FIRESTORE_EMULATOR_HOST). Optional here so builds need no secrets; uploads also need the bucket.
+   */
   NEXT_PUBLIC_FIREBASE_PROJECT_ID: optionalString,
   NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: optionalString,
   FIREBASE_CLIENT_EMAIL: optionalString,

@@ -1,11 +1,14 @@
-import "dotenv/config";
-
-const testUrl = process.env.TEST_DATABASE_URL;
-if (!testUrl) {
-  throw new Error("Set TEST_DATABASE_URL to a migrated, seeded test database (see README).");
+/**
+ * Integration tests run the real services against the Firestore emulator
+ * (never a real project): `npm run test:integration` starts it, seeds it and runs
+ * the suite. The seed's demo lounges are the fixtures.
+ */
+if (!process.env.FIRESTORE_EMULATOR_HOST) {
+  throw new Error("Integration tests need the Firestore emulator: run `npm run test:integration` (sets FIRESTORE_EMULATOR_HOST).");
 }
-if (testUrl === process.env.DATABASE_URL) {
-  throw new Error("TEST_DATABASE_URL must differ from DATABASE_URL; integration tests write data.");
-}
-process.env.DATABASE_URL = testUrl;
+// Never let a test write to a real project, even if .env holds credentials.
+delete process.env.FIREBASE_CLIENT_EMAIL;
+delete process.env.FIREBASE_PRIVATE_KEY;
+process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID = "demo-gaming-lounge";
+process.env.AUTH_SECRET ??= "integration-test-secret-integration-test-secret";
 process.env.PAYMENTS_MODE = "mock";

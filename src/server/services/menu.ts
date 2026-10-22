@@ -1,7 +1,7 @@
 import "server-only";
-import type { MenuItemCategory, Prisma } from "@/generated/prisma/client";
+import type { MenuItemCategory, InputJsonValue } from "@/lib/db/types";
 import { fromMinor, type Minor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db, type TxClient } from "@/server/db";
 import { PosError, type PosContext } from "./pos";
 
 /**
@@ -9,12 +9,12 @@ import { PosError, type PosContext } from "./pos";
  * are archived rather than deleted, so sales reports keep their lines.
  */
 
-type Tx = Prisma.TransactionClient;
+type Tx = TxClient;
 
 const MAX_PRICE: Minor = 100_000_000; // 1,000,000.00
 const MAX_STOCK = 100_000;
 
-function audit(tx: Tx, ctx: PosContext, action: string, entityType: string, entityId: string, data?: Prisma.InputJsonValue) {
+function audit(tx: Tx, ctx: PosContext, action: string, entityType: string, entityId: string, data?: InputJsonValue) {
   return tx.auditLog.create({ data: { actorId: ctx.actorId, loungeId: ctx.loungeId, action, entityType, entityId, data } });
 }
 
@@ -80,7 +80,7 @@ async function itemFields(tx: Tx, ctx: PosContext, input: MenuItemInput, itemId?
 }
 
 export async function createMenuItem(ctx: PosContext, input: MenuItemInput) {
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const data = await itemFields(tx, ctx, input);
     const last = await tx.menuItem.aggregate({ where: { menuCategoryId: data.menuCategoryId }, _max: { sortOrder: true } });
     const item = await tx.menuItem.create({
@@ -98,7 +98,7 @@ export async function createMenuItem(ctx: PosContext, input: MenuItemInput) {
  * overwriting the new count.
  */
 export async function updateMenuItem(ctx: PosContext, itemId: string, input: MenuItemInput, expectedStock?: number | null) {
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const item = await tx.menuItem.findFirst({ where: { id: itemId, loungeId: ctx.loungeId, archivedAt: null } });
     if (!item) throw new PosError("NOT_FOUND");
     const data = await itemFields(tx, ctx, input, item.id);
@@ -116,7 +116,7 @@ export async function updateMenuItem(ctx: PosContext, itemId: string, input: Men
 }
 
 export async function setMenuItemAvailability(ctx: PosContext, input: { itemId: string; isAvailable: boolean }) {
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const res = await tx.menuItem.updateMany({
       where: { id: input.itemId, loungeId: ctx.loungeId, archivedAt: null },
       data: { isAvailable: input.isAvailable },
@@ -129,7 +129,7 @@ export async function setMenuItemAvailability(ctx: PosContext, input: { itemId: 
 /** Restock (+) or write off (−) relative to the current count, so concurrent sales are never lost. */
 export async function adjustMenuStock(ctx: PosContext, input: { itemId: string; delta: number }) {
   if (!Number.isInteger(input.delta) || input.delta === 0 || Math.abs(input.delta) > MAX_STOCK) throw new PosError("INVALID_INPUT");
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const item = await tx.menuItem.findFirst({ where: { id: input.itemId, loungeId: ctx.loungeId, archivedAt: null } });
     if (!item) throw new PosError("NOT_FOUND");
     if (item.stockQuantity === null) throw new PosError("INVALID_STATE");
@@ -146,7 +146,7 @@ export async function adjustMenuStock(ctx: PosContext, input: { itemId: string; 
 
 /** Deletes an item never sold; archives one with order history. */
 export async function removeMenuItem(ctx: PosContext, itemId: string, now = new Date()): Promise<{ result: "DELETED" | "ARCHIVED" }> {
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const item = await tx.menuItem.findFirst({ where: { id: itemId, loungeId: ctx.loungeId, archivedAt: null } });
     if (!item) throw new PosError("NOT_FOUND");
     if (await tx.canteenOrderItem.count({ where: { menuItemId: item.id } })) {
@@ -162,7 +162,7 @@ export async function removeMenuItem(ctx: PosContext, itemId: string, now = new 
 
 /** Brings an archived item back, unavailable until someone checks it. */
 export async function restoreMenuItem(ctx: PosContext, itemId: string) {
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const item = await tx.menuItem.findFirst({ where: { id: itemId, loungeId: ctx.loungeId, archivedAt: { not: null } } });
     if (!item) throw new PosError("NOT_FOUND");
     if (await tx.menuItem.count({ where: { loungeId: ctx.loungeId, name: item.name, archivedAt: null } })) throw new PosError("NAME_TAKEN");
@@ -195,7 +195,7 @@ function categoryFields(input: MenuCategoryInput) {
 
 export async function createMenuCategory(ctx: PosContext, input: MenuCategoryInput) {
   const data = categoryFields(input);
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     if (await tx.menuCategory.count({ where: { loungeId: ctx.loungeId, name: data.name } })) throw new PosError("NAME_TAKEN");
     const last = await tx.menuCategory.aggregate({ where: { loungeId: ctx.loungeId }, _max: { sortOrder: true } });
     const category = await tx.menuCategory.create({
@@ -209,7 +209,7 @@ export async function createMenuCategory(ctx: PosContext, input: MenuCategoryInp
 
 export async function updateMenuCategory(ctx: PosContext, categoryId: string, input: MenuCategoryInput) {
   const data = categoryFields(input);
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const category = await tx.menuCategory.findFirst({ where: { id: categoryId, loungeId: ctx.loungeId } });
     if (!category) throw new PosError("NOT_FOUND");
     if (await tx.menuCategory.count({ where: { loungeId: ctx.loungeId, name: data.name, id: { not: category.id } } })) {
@@ -230,7 +230,7 @@ export async function updateMenuCategory(ctx: PosContext, categoryId: string, in
 
 /** Only a category with no items at all (archived ones included) can be deleted. */
 export async function deleteMenuCategory(ctx: PosContext, categoryId: string) {
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const category = await tx.menuCategory.findFirst({ where: { id: categoryId, loungeId: ctx.loungeId } });
     if (!category) throw new PosError("NOT_FOUND");
     if (await tx.menuItem.count({ where: { menuCategoryId: category.id } })) throw new PosError("CATEGORY_IN_USE");

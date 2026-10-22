@@ -1,15 +1,15 @@
 import "server-only";
 import "next-auth/jwt";
-import { PrismaAdapter } from "@auth/prisma-adapter";
 import bcrypt from "bcryptjs";
 import NextAuth, { type DefaultSession } from "next-auth";
 import type { Provider } from "next-auth/providers";
 import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { z } from "zod";
-import type { Role } from "@/generated/prisma/client";
+import type { Role } from "@/lib/db/types";
 import { env, googleOAuth, isGoogleAuthEnabled } from "@/lib/env";
-import { prisma } from "@/lib/prisma";
+import { firestoreAdapter } from "@/server/auth-adapter";
+import { db } from "@/server/db";
 
 declare module "next-auth" {
   interface Session {
@@ -41,7 +41,7 @@ const providers: Provider[] = [
     async authorize(raw) {
       const parsed = credentialsSchema.safeParse(raw);
       if (!parsed.success) return null;
-      const user = await prisma.user.findUnique({ where: { email: parsed.data.email } });
+      const user = await db.user.findUnique({ where: { email: parsed.data.email } });
       // Compare against a dummy hash when the user is missing to keep timing uniform.
       const hash = user?.passwordHash ?? DUMMY_HASH;
       const valid = await bcrypt.compare(parsed.data.password, hash);
@@ -64,7 +64,7 @@ if (isGoogleAuthEnabled) {
 }
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
-  adapter: PrismaAdapter(prisma),
+  adapter: firestoreAdapter(),
   // Credentials sign-in requires JWT sessions.
   session: { strategy: "jwt" },
   secret: env.AUTH_SECRET,
@@ -76,9 +76,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (user?.id) {
         token.id = user.id;
         // OAuth users come from the adapter without our custom fields.
-        token.role = user.role ?? (await prisma.user.findUnique({ where: { id: user.id }, select: { role: true } }))?.role;
+        token.role = user.role ?? (await db.user.findUnique({ where: { id: user.id }, select: { role: true } }))?.role;
       } else if (trigger === "update" && token.id) {
-        token.role = (await prisma.user.findUnique({ where: { id: token.id }, select: { role: true } }))?.role;
+        token.role = (await db.user.findUnique({ where: { id: token.id }, select: { role: true } }))?.role;
       }
       return token;
     },
@@ -93,7 +93,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       if (account?.provider === "google" && profile?.email_verified !== true) return false;
       // Block OAuth sign-in for deactivated accounts.
       if (!user.email) return false;
-      const existing = await prisma.user.findUnique({ where: { email: user.email }, select: { isActive: true } });
+      const existing = await db.user.findUnique({ where: { email: user.email }, select: { isActive: true } });
       return existing?.isActive ?? true;
     },
   },
@@ -106,9 +106,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
      */
     async linkAccount({ user, account }) {
       if (account.provider !== "google" || !user.id) return;
-      const current = await prisma.user.findUnique({ where: { id: user.id }, select: { emailVerified: true } });
+      const current = await db.user.findUnique({ where: { id: user.id }, select: { emailVerified: true } });
       if (!current || current.emailVerified) return;
-      await prisma.user.update({ where: { id: user.id }, data: { emailVerified: new Date(), passwordHash: null } });
+      await db.user.update({ where: { id: user.id }, data: { emailVerified: new Date(), passwordHash: null } });
     },
   },
 });

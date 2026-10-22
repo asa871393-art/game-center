@@ -1,4 +1,4 @@
-import type { PaymentStatus } from "@/generated/prisma/enums";
+import type { PaymentStatus } from "@/lib/db/types";
 import { applyBps, type Minor } from "@/lib/money";
 
 export interface BookingTotalsInput {

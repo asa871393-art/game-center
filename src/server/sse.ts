@@ -56,7 +56,7 @@ export function loungeEventStream(
       };
       signal.addEventListener("abort", cleanup, { once: true });
 
-      // Tell the client to retry quickly after a drop, then confirm once LISTEN is live.
+      // Tell the client to retry quickly after a drop, then confirm once the Firestore listener is live.
       write("retry: 3000\n\n");
       loungeEvents.ensureConnected().then(
         () => send("ready", {}),

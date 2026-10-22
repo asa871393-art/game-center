@@ -1,4 +1,4 @@
-import type { PriceTier } from "@/generated/prisma/enums";
+import type { PriceTier } from "@/lib/db/types";
 import { applyBps, type Minor } from "@/lib/money";
 import { quoteBooking, type PricingRuleInput } from "./pricing";
 

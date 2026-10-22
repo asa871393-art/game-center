@@ -1,6 +1,6 @@
 import "server-only";
 import { toMinor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/server/db";
 
 const bookingInclude = {
   lounge: { select: { name: true, slug: true, timezone: true, addressLine: true, city: true } },
@@ -16,7 +16,7 @@ const bookingInclude = {
 
 /** A customer's own booking by reference; null if missing or owned by someone else. */
 export async function getCustomerBooking(reference: string, customerId: string, now = new Date()) {
-  const b = await prisma.booking.findFirst({ where: { reference, customerId }, include: bookingInclude });
+  const b = await db.booking.findFirst({ where: { reference, customerId }, include: bookingInclude });
   if (!b) return null;
   // An unpaid hold past its expiry no longer reserves the slot; show it as cancelled
   // even before the next booking on that device cleans it up.
@@ -48,7 +48,7 @@ export async function getCustomerBooking(reference: string, customerId: string, 
 }
 
 export async function listCustomerBookings(customerId: string) {
-  const rows = await prisma.booking.findMany({
+  const rows = await db.booking.findMany({
     where: { customerId },
     orderBy: { scheduledStart: "desc" },
     take: 50,
@@ -72,7 +72,7 @@ export async function listCustomerBookings(customerId: string) {
 
 /** Pending sandbox checkout, visible only to the payer. */
 export async function getCheckoutTransaction(transactionId: string, userId: string) {
-  const t = await prisma.transaction.findFirst({
+  const t = await db.transaction.findFirst({
     where: { id: transactionId, userId },
     include: {
       booking: {

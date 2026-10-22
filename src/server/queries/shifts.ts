@@ -1,6 +1,6 @@
 import "server-only";
 import { toMinor, type Minor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/server/db";
 import { getShiftSummary } from "@/server/services/shift";
 
 const HISTORY_LIMIT = 60;
@@ -20,10 +20,10 @@ export interface ShiftHistoryRow {
 
 /** Recent shifts for the manager's history log, newest first. The open shift's figures are live. */
 export async function getShiftHistory(loungeId: string) {
-  const lounge = await prisma.lounge.findUnique({ where: { id: loungeId }, select: { id: true, name: true, timezone: true, currency: true } });
+  const lounge = await db.lounge.findUnique({ where: { id: loungeId }, select: { id: true, name: true, timezone: true, currency: true } });
   if (!lounge) return null;
 
-  const shifts = await prisma.shift.findMany({
+  const shifts = await db.shift.findMany({
     where: { loungeId },
     orderBy: { openedAt: "desc" },
     take: HISTORY_LIMIT,
@@ -31,12 +31,12 @@ export async function getShiftHistory(loungeId: string) {
   });
   const ids = shifts.map((s) => s.id);
   const [collected, expenses] = await Promise.all([
-    prisma.transaction.groupBy({
+    db.transaction.groupBy({
       by: ["shiftId"],
       where: { shiftId: { in: ids }, status: "SUCCEEDED", type: "PAYMENT" },
       _sum: { amount: true },
     }),
-    prisma.shiftExpense.groupBy({ by: ["shiftId"], where: { shiftId: { in: ids }, voidedAt: null }, _sum: { amount: true } }),
+    db.shiftExpense.groupBy({ by: ["shiftId"], where: { shiftId: { in: ids }, voidedAt: null }, _sum: { amount: true } }),
   ]);
   const collectedBy = new Map(collected.map((c) => [c.shiftId, c._sum.amount ? toMinor(c._sum.amount) : 0]));
   const expensesBy = new Map(expenses.map((e) => [e.shiftId, e._sum.amount ? toMinor(e._sum.amount) : 0]));

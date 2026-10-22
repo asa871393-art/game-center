@@ -1,7 +1,8 @@
 import "server-only";
-import { Prisma, type DeviceType } from "@/generated/prisma/client";
+import { isIP } from "node:net";
+import type { DeviceType, InputJsonValue } from "@/lib/db/types";
 import { fromMinor, toMinor, type Minor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db, type TxClient, type DbReader } from "@/server/db";
 import { BLOCKING_STATUSES } from "@/server/queries/lounges";
 import { PosError, splitOpenSegmentsOnDevice, type PosContext } from "./pos";
 
@@ -11,7 +12,7 @@ import { PosError, splitOpenSegmentsOnDevice, type PosContext } from "./pos";
  * the same way the pricing engine applies them.
  */
 
-type Tx = Prisma.TransactionClient;
+type Tx = TxClient;
 
 const MAX_RATE: Minor = 100_000_000; // 1,000,000.00 per hour
 const SLOT_INTERVALS = [5, 10, 15, 20, 30, 60] as const;
@@ -26,7 +27,7 @@ const FOOTPRINT: Record<DeviceType, { width: number; height: number }> = {
   OTHER: { width: 1, height: 1 },
 };
 
-function audit(tx: Tx, ctx: PosContext, action: string, entityType: string, entityId: string, data?: Prisma.InputJsonValue) {
+function audit(tx: Tx, ctx: PosContext, action: string, entityType: string, entityId: string, data?: InputJsonValue) {
   return tx.auditLog.create({ data: { actorId: ctx.actorId, loungeId: ctx.loungeId, action, entityType, entityId, data } });
 }
 
@@ -56,6 +57,19 @@ export function normalizeMac(raw: string | null | undefined): string | null {
   const hex = raw.replace(/[^0-9a-fA-F]/g, "");
   if (hex.length !== 12 || raw.replace(/[0-9a-fA-F:.\-\s]/g, "").length > 0) throw new PosError("INVALID_INPUT");
   return hex.toUpperCase().match(/.{2}/g)!.join(":");
+}
+
+/** "10.0.0.7" | "fe80::1" | "10.0.0.0/24" (the forms Postgres inet accepted); throws INVALID_INPUT otherwise. */
+export function normalizeIp(raw: string | null | undefined): string | null {
+  const value = raw?.trim();
+  if (!value) return null;
+  const [addr, prefix, ...rest] = value.split("/");
+  const version = isIP(addr);
+  const maxPrefix = version === 4 ? 32 : 128;
+  if (!version || rest.length || (prefix !== undefined && !(/^\d{1,3}$/.test(prefix) && Number(prefix) <= maxPrefix))) {
+    throw new PosError("INVALID_INPUT");
+  }
+  return value;
 }
 
 /** First free top-left cell for a w×h device on the floor grid, row by row; null if the floor is full. */
@@ -136,8 +150,8 @@ async function resolveDeviceFields(tx: Tx, ctx: PosContext, input: DeviceInput, 
       code,
       categoryId: category.id,
       zoneId: input.zoneId || null,
-      specs: input.specs?.trim() ? ({ summary: input.specs.trim().slice(0, 300) } as Prisma.InputJsonValue) : Prisma.DbNull,
-      ipAddress: input.ipAddress?.trim() || null,
+      specs: input.specs?.trim() ? ({ summary: input.specs.trim().slice(0, 300) } as InputJsonValue) : null,
+      ipAddress: normalizeIp(input.ipAddress),
       macAddress: normalizeMac(input.macAddress),
       notes: input.notes?.trim() || null,
       isBookableOnline: input.isBookableOnline,
@@ -148,96 +162,82 @@ async function resolveDeviceFields(tx: Tx, ctx: PosContext, input: DeviceInput, 
   };
 }
 
-function isInetError(error: unknown): boolean {
-  return /inet|invalid input syntax for type/i.test(String((error as Error)?.message ?? error));
-}
-
 export async function createDevice(ctx: PosContext, input: DeviceInput) {
-  try {
-    return await prisma.$transaction(async (tx) => {
-      const { category, data } = await resolveDeviceFields(tx, ctx, input);
-      const lounge = await tx.lounge.findUniqueOrThrow({
-        where: { id: ctx.loungeId },
-        select: { floorPlanWidth: true, floorPlanHeight: true },
-      });
-      const size = {
-        width: input.width ?? FOOTPRINT[category.type].width,
-        height: input.height ?? FOOTPRINT[category.type].height,
-      };
-      let spot = input.posX !== undefined && input.posY !== undefined ? { posX: input.posX, posY: input.posY } : null;
-      if (!spot) {
-        const taken = await tx.device.findMany({
-          where: { loungeId: ctx.loungeId, archivedAt: null },
-          select: { posX: true, posY: true, width: true, height: true },
-        });
-        spot = findFreeSpot({ width: lounge.floorPlanWidth, height: lounge.floorPlanHeight }, taken, size);
-        if (!spot) {
-          // Floor full: grow it downwards.
-          spot = { posX: 0, posY: lounge.floorPlanHeight };
-          await tx.lounge.update({ where: { id: ctx.loungeId }, data: { floorPlanHeight: lounge.floorPlanHeight + size.height } });
-        }
-      }
-      const device = await tx.device.create({
-        data: {
-          ...data,
-          loungeId: ctx.loungeId,
-          status: input.status === "ACTIVE" ? "IDLE" : input.status,
-          ...spot,
-          ...size,
-        },
-        select: { id: true, name: true },
-      });
-      await audit(tx, ctx, "device.create", "Device", device.id, { name: device.name });
-      return device;
+  return db.$transaction(async (tx) => {
+    const { category, data } = await resolveDeviceFields(tx, ctx, input);
+    const lounge = await tx.lounge.findUniqueOrThrow({
+      where: { id: ctx.loungeId },
+      select: { floorPlanWidth: true, floorPlanHeight: true },
     });
-  } catch (error) {
-    if (isInetError(error)) throw new PosError("INVALID_INPUT");
-    throw error;
-  }
+    const size = {
+      width: input.width ?? FOOTPRINT[category.type].width,
+      height: input.height ?? FOOTPRINT[category.type].height,
+    };
+    let spot = input.posX !== undefined && input.posY !== undefined ? { posX: input.posX, posY: input.posY } : null;
+    if (!spot) {
+      const taken = await tx.device.findMany({
+        where: { loungeId: ctx.loungeId, archivedAt: null },
+        select: { posX: true, posY: true, width: true, height: true },
+      });
+      spot = findFreeSpot({ width: lounge.floorPlanWidth, height: lounge.floorPlanHeight }, taken, size);
+      if (!spot) {
+        // Floor full: grow it downwards.
+        spot = { posX: 0, posY: lounge.floorPlanHeight };
+        await tx.lounge.update({ where: { id: ctx.loungeId }, data: { floorPlanHeight: lounge.floorPlanHeight + size.height } });
+      }
+    }
+    const device = await tx.device.create({
+      data: {
+        ...data,
+        loungeId: ctx.loungeId,
+        status: input.status === "ACTIVE" ? "IDLE" : input.status,
+        ...spot,
+        ...size,
+      },
+      select: { id: true, name: true },
+    });
+    await audit(tx, ctx, "device.create", "Device", device.id, { name: device.name });
+    return device;
+  });
 }
 
 export async function updateDevice(ctx: PosContext, deviceId: string, input: DeviceInput) {
   const now = ctx.now ?? new Date();
-  try {
-    return await prisma.$transaction(async (tx) => {
-      const device = await tx.device.findFirst({ where: { id: deviceId, loungeId: ctx.loungeId, archivedAt: null } });
-      if (!device) throw new PosError("NOT_FOUND");
-      const { data } = await resolveDeviceFields(tx, ctx, input, device.id);
-      const active = await tx.booking.count({ where: { deviceId: device.id, status: "ACTIVE" } });
+  return db.$transaction(async (tx) => {
+    const device = await tx.device.findFirst({ where: { id: deviceId, loungeId: ctx.loungeId, archivedAt: null } });
+    if (!device) throw new PosError("NOT_FOUND");
+    const { data } = await resolveDeviceFields(tx, ctx, input, device.id);
+    const active = await tx.booking.count({ where: { deviceId: device.id, status: "ACTIVE" } });
 
-      if (active > 0 && (input.status !== "ACTIVE" || data.categoryId !== device.categoryId)) throw new PosError("DEVICE_BUSY");
+    if (active > 0 && (input.status !== "ACTIVE" || data.categoryId !== device.categoryId)) throw new PosError("DEVICE_BUSY");
 
-      const ratesChanged =
-        String(device.hourlyRateOverride ?? "") !== String(data.hourlyRateOverride ?? "") ||
-        device.multiTierBpsOverride !== data.multiTierBpsOverride ||
-        device.vipTierBpsOverride !== data.vipTierBpsOverride;
-      // Running open sessions keep the old rate up to now, the new one from now on.
-      if (ratesChanged && active > 0) await splitOpenSegmentsOnDevice(tx, ctx.loungeId, device.id, now);
+    const ratesChanged =
+      String(device.hourlyRateOverride ?? "") !== String(data.hourlyRateOverride ?? "") ||
+      device.multiTierBpsOverride !== data.multiTierBpsOverride ||
+      device.vipTierBpsOverride !== data.vipTierBpsOverride;
+    // Running open sessions keep the old rate up to now, the new one from now on.
+    if (ratesChanged && active > 0) await splitOpenSegmentsOnDevice(tx, ctx.loungeId, device.id, now);
 
-      const status =
-        input.status !== "ACTIVE" ? input.status : device.status === "MAINTENANCE" || device.status === "OFFLINE" ? "IDLE" : device.status;
-      await tx.device.update({
-        where: { id: device.id },
-        data: {
-          ...data,
-          status,
-          ...(input.posX !== undefined ? { posX: input.posX } : {}),
-          ...(input.posY !== undefined ? { posY: input.posY } : {}),
-          ...(input.width !== undefined ? { width: input.width } : {}),
-          ...(input.height !== undefined ? { height: input.height } : {}),
-        },
-      });
-      await audit(tx, ctx, "device.update", "Device", device.id, { ratesChanged, status });
-      return { id: device.id };
+    const status =
+      input.status !== "ACTIVE" ? input.status : device.status === "MAINTENANCE" || device.status === "OFFLINE" ? "IDLE" : device.status;
+    await tx.device.update({
+      where: { id: device.id },
+      data: {
+        ...data,
+        status,
+        ...(input.posX !== undefined ? { posX: input.posX } : {}),
+        ...(input.posY !== undefined ? { posY: input.posY } : {}),
+        ...(input.width !== undefined ? { width: input.width } : {}),
+        ...(input.height !== undefined ? { height: input.height } : {}),
+      },
     });
-  } catch (error) {
-    if (isInetError(error)) throw new PosError("INVALID_INPUT");
-    throw error;
-  }
+    await audit(tx, ctx, "device.update", "Device", device.id, { ratesChanged, status });
+    return { id: device.id };
+  });
 }
 
 /** Usage that blocks removal, and whether there's history to keep. */
-export async function deviceUsage(db: Tx | typeof prisma, deviceId: string, now = new Date()) {
+export async function deviceUsage(db: Tx | DbReader, deviceId: string, now = new Date()) {
   const [active, upcoming, history] = await Promise.all([
     db.booking.count({ where: { deviceId, status: "ACTIVE" } }),
     db.booking.count({
@@ -261,7 +261,7 @@ export async function deviceUsage(db: Tx | typeof prisma, deviceId: string, now 
  */
 export async function removeDevice(ctx: PosContext, deviceId: string): Promise<{ result: "DELETED" | "ARCHIVED" }> {
   const now = ctx.now ?? new Date();
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const device = await tx.device.findFirst({ where: { id: deviceId, loungeId: ctx.loungeId, archivedAt: null } });
     if (!device) throw new PosError("NOT_FOUND");
     const usage = await deviceUsage(tx, device.id, now);
@@ -284,7 +284,7 @@ export async function removeDevice(ctx: PosContext, deviceId: string): Promise<{
 
 /** Brings an archived device back (out of service, so it's checked before use). */
 export async function restoreDevice(ctx: PosContext, deviceId: string) {
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const device = await tx.device.findFirst({ where: { id: deviceId, loungeId: ctx.loungeId, archivedAt: { not: null } } });
     if (!device) throw new PosError("NOT_FOUND");
     await tx.device.update({ where: { id: device.id }, data: { archivedAt: null, status: "MAINTENANCE" } });
@@ -342,7 +342,7 @@ function categoryData(input: CategoryInput) {
 
 export async function createCategory(ctx: PosContext, input: CategoryInput) {
   const data = categoryData(input);
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     if (await tx.deviceCategory.count({ where: { loungeId: ctx.loungeId, name: data.name } })) throw new PosError("NAME_TAKEN");
     const category = await tx.deviceCategory.create({ data: { ...data, loungeId: ctx.loungeId }, select: { id: true } });
     await audit(tx, ctx, "category.create", "DeviceCategory", category.id, { name: data.name });
@@ -353,7 +353,7 @@ export async function createCategory(ctx: PosContext, input: CategoryInput) {
 export async function updateCategory(ctx: PosContext, categoryId: string, input: CategoryInput) {
   const data = categoryData(input);
   const now = ctx.now ?? new Date();
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const category = await tx.deviceCategory.findFirst({ where: { id: categoryId, loungeId: ctx.loungeId } });
     if (!category) throw new PosError("NOT_FOUND");
     if (await tx.deviceCategory.count({ where: { loungeId: ctx.loungeId, name: data.name, id: { not: category.id } } })) {
@@ -376,7 +376,7 @@ export async function updateCategory(ctx: PosContext, categoryId: string, input:
 
 /** Only an empty category can be deleted; otherwise deactivate it (hides it from booking). */
 export async function deleteCategory(ctx: PosContext, categoryId: string) {
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const category = await tx.deviceCategory.findFirst({ where: { id: categoryId, loungeId: ctx.loungeId } });
     if (!category) throw new PosError("NOT_FOUND");
     if (await tx.device.count({ where: { categoryId: category.id } })) throw new PosError("CATEGORY_IN_USE");

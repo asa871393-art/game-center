@@ -1,6 +1,6 @@
 import "server-only";
-import type { LoungeMemberRole, Role } from "@/generated/prisma/client";
-import { prisma } from "@/lib/prisma";
+import type { LoungeMemberRole, Role } from "@/lib/db/types";
+import { db } from "@/server/db";
 
 /** Lounge-level permission ladder. */
 const RANK: Record<LoungeMemberRole, number> = { STAFF: 0, MANAGER: 1, OWNER: 2 };
@@ -20,7 +20,7 @@ export function hasLoungeRole(access: LoungeAccess, min: LoungeMemberRole): bool
  * memberships and deactivated accounts take effect immediately.
  */
 export async function getLoungeAccess(userId: string, loungeId: string): Promise<LoungeAccess | null> {
-  const user = await prisma.user.findUnique({
+  const user = await db.user.findUnique({
     where: { id: userId },
     select: {
       role: true,
@@ -30,7 +30,7 @@ export async function getLoungeAccess(userId: string, loungeId: string): Promise
   });
   if (!user?.isActive) return null;
   if (user.role === "SUPER_ADMIN") {
-    const exists = await prisma.lounge.count({ where: { id: loungeId } });
+    const exists = await db.lounge.count({ where: { id: loungeId } });
     return exists ? { loungeId, role: "OWNER" } : null;
   }
   const membership = user.memberships[0];
@@ -38,12 +38,12 @@ export async function getLoungeAccess(userId: string, loungeId: string): Promise
 }
 
 export async function loungeExists(loungeId: string): Promise<boolean> {
-  return (await prisma.lounge.count({ where: { id: loungeId } })) > 0;
+  return (await db.lounge.count({ where: { id: loungeId } })) > 0;
 }
 
 /** Lounges the user can open in the dashboard. */
 export async function listManagedLounges(userId: string, platformRole: Role) {
-  const lounges = await prisma.lounge.findMany({
+  const lounges = await db.lounge.findMany({
     where: platformRole === "SUPER_ADMIN" ? {} : { members: { some: { userId, isActive: true } } },
     orderBy: [{ city: "asc" }, { name: "asc" }],
     select: {

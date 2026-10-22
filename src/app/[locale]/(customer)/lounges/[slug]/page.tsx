@@ -1,6 +1,7 @@
 import { Clock, MapPin, Phone } from "lucide-react";
 import type { Metadata } from "next";
 import { notFound } from "next/navigation";
+import { connection } from "next/server";
 import { Suspense } from "react";
 import { getSession } from "@/server/session";
 import { deviceTypeMeta } from "@/components/lounge/device-type";
@@ -14,6 +15,8 @@ import { getLoungeDetails } from "@/server/queries/lounges";
 
 export async function generateMetadata({ params }: PageProps<"/[locale]/lounges/[slug]">): Promise<Metadata> {
   const { slug } = await params;
+  // Firestore reads are request-time (the SDK uses random request ids).
+  await connection();
   const lounge = await getLoungeDetails(slug);
   return lounge ? { title: lounge.name, description: lounge.description ?? undefined } : {};
 }
@@ -30,6 +33,7 @@ export default function LoungePage({ params }: PageProps<"/[locale]/lounges/[slu
 
 async function LoungeContent({ params }: Pick<PageProps<"/[locale]/lounges/[slug]">, "params">) {
   const { slug } = await params;
+  await connection();
   const [locale, lounge, session] = await Promise.all([getLocale(), getLoungeDetails(slug), getSession()]);
   if (!lounge) notFound();
   const dict = await getDictionary(locale);

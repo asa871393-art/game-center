@@ -1,5 +1,5 @@
 import { Badge } from "@/components/ui/badge";
-import type { BookingStatus } from "@/generated/prisma/enums";
+import type { BookingStatus } from "@/lib/db/types";
 import type { Dictionary } from "@/i18n/dictionaries/ar";
 import { cn } from "@/lib/utils";
 

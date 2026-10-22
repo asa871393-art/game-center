@@ -21,7 +21,7 @@ import {
   type LucideIcon,
 } from "lucide-react";
 import { createElement, useState } from "react";
-import type { MenuItemCategory } from "@/generated/prisma/enums";
+import type { MenuItemCategory } from "@/lib/db/types";
 import { cn } from "@/lib/utils";
 
 /** Icons a menu item can use when it has no image (stored as MenuItem.iconName). */

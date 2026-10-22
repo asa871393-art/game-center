@@ -18,7 +18,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Separator } from "@/components/ui/separator";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Textarea } from "@/components/ui/textarea";
-import type { CheckoutMethod } from "@/generated/prisma/enums";
+import type { CheckoutMethod } from "@/lib/db/types";
 import { useI18n } from "@/i18n/client";
 import { formatDuration, formatTime, localName, money } from "@/i18n/format";
 import { quoteBooking, type Quote } from "@/lib/booking/pricing";

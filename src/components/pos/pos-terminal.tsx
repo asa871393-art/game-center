@@ -11,7 +11,7 @@ import { LocaleSwitcher } from "@/components/site/locale-switcher";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
-import type { DeviceType } from "@/generated/prisma/enums";
+import type { DeviceType } from "@/lib/db/types";
 import { useDebouncedRefresh, useLiveEvents, type LiveStatus } from "@/hooks/use-live-events";
 import { useI18n } from "@/i18n/client";
 import { formatDate, money } from "@/i18n/format";

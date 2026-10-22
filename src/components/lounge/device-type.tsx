@@ -1,5 +1,5 @@
 import { Car, Crown, Gamepad2, Glasses, Monitor, Shapes, type LucideIcon } from "lucide-react";
-import type { DeviceType } from "@/generated/prisma/enums";
+import type { DeviceType } from "@/lib/db/types";
 
 export const DEVICE_TYPES: readonly DeviceType[] = ["PC", "CONSOLE", "VR", "VIP_ROOM", "SIMULATOR", "OTHER"];
 

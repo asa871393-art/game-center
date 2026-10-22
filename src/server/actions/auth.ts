@@ -7,7 +7,7 @@ import { credentialsSchema, signIn, signOut } from "@/auth";
 import { isLocale, localePath } from "@/i18n/config";
 import { getDictionaryFor } from "@/i18n/server";
 import { isGoogleAuthEnabled } from "@/lib/env";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/server/db";
 
 export interface AuthFormState {
   error?: string;
@@ -65,10 +65,10 @@ export async function registerWithCredentials(_prev: AuthFormState, formData: Fo
     };
   }
 
-  const existing = await prisma.user.findUnique({ where: { email: parsed.data.email }, select: { id: true } });
+  const existing = await db.user.findUnique({ where: { email: parsed.data.email }, select: { id: true } });
   if (existing) return { error: dict.auth.emailTaken, values, fieldErrors: { email: dict.auth.emailTaken } };
 
-  await prisma.user.create({
+  await db.user.create({
     data: {
       name: parsed.data.name,
       email: parsed.data.email,

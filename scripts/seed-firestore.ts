@@ -1,27 +1,32 @@
+/**
+ * Demo data for Firestore: platform admin, lounge owner, front-desk staff and the
+ * demo player (a super admin, so one login can try everything), the Nexus
+ * Gaming organization, two lounges with devices, pricing rules and a canteen menu.
+ *
+ *   npm run db:seed            (uses FIREBASE_* credentials from .env)
+ *   FIRESTORE_EMULATOR_HOST=127.0.0.1:8085 npm run db:seed
+ *
+ * Re-running rebuilds each demo lounge from scratch. Never run it against a
+ * production project: it creates accounts with a published password.
+ */
 import "dotenv/config";
-import { PrismaPg } from "@prisma/adapter-pg";
 import bcrypt from "bcryptjs";
 import {
   DeviceType,
   LoungeMemberRole,
   LoungeStatus,
   MenuItemCategory,
-  Prisma,
-  PrismaClient,
   Role,
   SubscriptionPlan,
   SubscriptionStatus,
-} from "../src/generated/prisma/client";
-
-const connectionString = process.env.DATABASE_URL;
-if (!connectionString) throw new Error("DATABASE_URL is not set");
-
-const prisma = new PrismaClient({ adapter: new PrismaPg({ connectionString }) });
+  type InputJsonValue,
+} from "@/lib/db/types";
+import { db } from "@/server/db";
 
 const DEMO_PASSWORD = "Password123!";
 
 async function upsertUser(email: string, name: string, role: Role, passwordHash: string) {
-  return prisma.user.upsert({
+  return db.user.upsert({
     where: { email },
     update: { name, role },
     create: { email, name, role, passwordHash, emailVerified: new Date() },
@@ -39,7 +44,7 @@ interface CategorySeed {
   multiTierBps?: number;
   vipTierBps?: number;
   iconName: string;
-  specs: Prisma.InputJsonObject;
+  specs: { [key: string]: InputJsonValue };
 }
 
 const CATEGORIES: CategorySeed[] = [
@@ -186,19 +191,18 @@ const LOUNGES: LoungeSeed[] = [
 ];
 
 async function seedLounge(organizationId: string, seed: LoungeSeed, members: { userId: string; role: LoungeMemberRole }[]) {
-  const existing = await prisma.lounge.findUnique({ where: { slug: seed.slug } });
+  const existing = await db.lounge.findUnique({ where: { slug: seed.slug } });
   if (existing) {
     // Re-running the seed rebuilds each demo lounge from scratch.
-    await prisma.$transaction([
-      prisma.transaction.deleteMany({ where: { loungeId: existing.id } }),
-      prisma.canteenOrder.deleteMany({ where: { loungeId: existing.id } }),
-      prisma.booking.deleteMany({ where: { loungeId: existing.id } }),
-      prisma.lounge.delete({ where: { id: existing.id } }),
-    ]);
+    await db.transaction.deleteMany({ where: { loungeId: existing.id } });
+    await db.canteenOrder.deleteMany({ where: { loungeId: existing.id } });
+    await db.booking.deleteMany({ where: { loungeId: existing.id } });
+    await db.auditLog.deleteMany({ where: { loungeId: existing.id } });
+    await db.lounge.delete({ where: { id: existing.id } });
   }
 
   const width = 20;
-  const lounge = await prisma.lounge.create({
+  const lounge = await db.lounge.create({
     data: {
       organizationId,
       name: seed.name,
@@ -241,7 +245,7 @@ async function seedLounge(organizationId: string, seed: LoungeSeed, members: { u
   const categoryIds: Partial<Record<CategorySeed["key"], string>> = {};
   for (const c of CATEGORIES) {
     if (counts[c.key] === 0) continue;
-    const created = await prisma.deviceCategory.create({
+    const created = await db.deviceCategory.create({
       data: {
         loungeId: lounge.id,
         name: c.name,
@@ -304,17 +308,17 @@ async function seedLounge(organizationId: string, seed: LoungeSeed, members: { u
       height: 4,
     })),
   ];
-  await prisma.device.createMany({ data: devices.map((d) => ({ ...d, loungeId: lounge.id })) });
+  await db.device.createMany({ data: devices.map((d) => ({ ...d, loungeId: lounge.id })) });
 
   // One device under maintenance so the floor plan shows a disabled state.
   if (seed.pcs > 0) {
-    await prisma.device.update({
+    await db.device.update({
       where: { loungeId_code: { loungeId: lounge.id, code: `PC${pad(seed.pcs)}` } },
       data: { status: "MAINTENANCE" },
     });
   }
 
-  await prisma.pricingRule.createMany({
+  await db.pricingRule.createMany({
     data: [
       {
         loungeId: lounge.id,
@@ -345,12 +349,12 @@ async function seedLounge(organizationId: string, seed: LoungeSeed, members: { u
 
   const sections = new Map<string, { id: string; kind: MenuItemCategory }>();
   for (const [sortOrder, c] of MENU_CATEGORIES.entries()) {
-    const created = await prisma.menuCategory.create({
+    const created = await db.menuCategory.create({
       data: { loungeId: lounge.id, name: c.name, nameEn: c.nameEn, kind: c.kind, sortOrder },
     });
     sections.set(c.key, { id: created.id, kind: c.kind });
   }
-  await prisma.menuItem.createMany({
+  await db.menuItem.createMany({
     data: MENU.map(({ section, ...item }, sortOrder) => ({
       ...item,
       loungeId: lounge.id,
@@ -372,23 +376,23 @@ async function main() {
   // Super admin too, so one login can book as a player and manage every lounge (POS, devices, menu).
   const customer = await upsertUser("player@gamelounge.dev", "Demo Player", Role.SUPER_ADMIN, passwordHash);
 
-  await prisma.wallet.upsert({
+  await db.wallet.upsert({
     where: { userId: customer.id },
     update: { currency: "IQD" },
     create: { userId: customer.id, balance: "50000", currency: "IQD" },
   });
 
-  const org = await prisma.organization.upsert({
+  const org = await db.organization.upsert({
     where: { slug: "nexus-gaming" },
     update: {},
     create: { name: "Nexus Gaming", slug: "nexus-gaming", ownerId: owner.id, commissionRateBps: 1000 },
   });
 
-  if ((await prisma.subscription.count({ where: { organizationId: org.id } })) === 0) {
+  if ((await db.subscription.count({ where: { organizationId: org.id } })) === 0) {
     const now = new Date();
     const periodEnd = new Date(now);
     periodEnd.setMonth(periodEnd.getMonth() + 1);
-    await prisma.subscription.create({
+    await db.subscription.create({
       data: {
         organizationId: org.id,
         plan: SubscriptionPlan.PRO,
@@ -422,4 +426,4 @@ main()
     console.error(e);
     process.exitCode = 1;
   })
-  .finally(() => prisma.$disconnect());
+  .finally(() => db.$disconnect());

@@ -1,6 +1,6 @@
 import "server-only";
 import { randomInt } from "node:crypto";
-import type { CheckoutMethod, Prisma } from "@/generated/prisma/client";
+import type { CheckoutMethod } from "@/lib/db/types";
 import type { Locale } from "@/i18n/config";
 import { localePath } from "@/i18n/config";
 import { PRICING_STEP_MINUTES, quoteBooking, type PricingRuleInput } from "@/lib/booking/pricing";
@@ -8,7 +8,7 @@ import { findContainingWindow } from "@/lib/booking/schedule";
 import { addMinutes, diffMinutes } from "@/lib/booking/time";
 import { env } from "@/lib/env";
 import { fromMinor, toMinor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db, isDbError, type TxClient } from "@/server/db";
 import { getPaymentProvider, isOnlineMethod } from "@/server/payments";
 
 export const MAX_ADVANCE_DAYS = 14;
@@ -63,18 +63,9 @@ export function generateReference(): string {
   return ref;
 }
 
-/** True when `error` is the Postgres exclusion violation from Booking_no_overlap_per_device. */
+/** True when `error` is the data layer's booking-overlap violation (two live bookings on one device). */
 export function isOverlapViolation(error: unknown): boolean {
-  const seen = new Set<unknown>();
-  const visit = (e: unknown): boolean => {
-    if (!e || typeof e !== "object" || seen.has(e)) return false;
-    seen.add(e);
-    const rec = e as Record<string, unknown>;
-    if (rec.code === "23P01" || rec.originalCode === "23P01") return true;
-    if (typeof rec.message === "string" && rec.message.includes("Booking_no_overlap_per_device")) return true;
-    return visit(rec.cause) || visit(rec.meta) || visit(rec.driverAdapterError);
-  };
-  return visit(error);
+  return isDbError(error, "23P01");
 }
 
 function mergeAddOns(addOns: CreateBookingInput["addOns"]) {
@@ -88,7 +79,7 @@ function mergeAddOns(addOns: CreateBookingInput["addOns"]) {
  * tracked menu items. Used for expired payment holds and declined payments.
  */
 export async function releaseBookings(
-  tx: Prisma.TransactionClient,
+  tx: TxClient,
   bookingIds: string[],
   reason: string,
   now = new Date(),
@@ -119,7 +110,7 @@ export async function releaseBookings(
 export async function createBooking(input: CreateBookingInput): Promise<CreateBookingResult> {
   const now = input.now ?? new Date();
 
-  const lounge = await prisma.lounge.findFirst({
+  const lounge = await db.lounge.findFirst({
     where: { slug: input.loungeSlug, status: "ACTIVE" },
     include: {
       openingHours: true,
@@ -161,7 +152,7 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
     throw new BookingError("ITEM_UNAVAILABLE");
   }
   const menuItems = addOns.length
-    ? await prisma.menuItem.findMany({
+    ? await db.menuItem.findMany({
         where: { loungeId: lounge.id, id: { in: addOns.map((a) => a.menuItemId) }, isAvailable: true, archivedAt: null },
       })
     : [];
@@ -197,7 +188,7 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
 
   let created: { bookingId: string; transactionId: string | null };
   try {
-    created = await prisma.$transaction(async (tx) => {
+    created = await db.$transaction(async (tx) => {
       // Free this device's expired payment holds so they don't trip the overlap constraint.
       const expired = await tx.booking.findMany({
         where: { deviceId: device.id, status: "PENDING", expiresAt: { lte: now } },
@@ -303,11 +294,11 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
       description: `${lounge.name} · ${device.name} · ${reference}`,
       locale: input.locale,
     });
-    await prisma.transaction.update({ where: { id: created.transactionId }, data: { providerRef: payment.providerRef } });
+    await db.transaction.update({ where: { id: created.transactionId }, data: { providerRef: payment.providerRef } });
     return { reference, redirectUrl: payment.redirectUrl };
   } catch (error) {
     // The gateway failed: release the hold rather than leave a dead booking.
-    await prisma.$transaction((tx) => releaseBookings(tx, [created.bookingId], "PAYMENT_INIT_FAILED"));
+    await db.$transaction((tx) => releaseBookings(tx, [created.bookingId], "PAYMENT_INIT_FAILED"));
     console.error("Payment init failed", error);
     throw new BookingError("PAYMENT_UNAVAILABLE");
   }
@@ -325,7 +316,7 @@ export async function settlePayment(
   outcome: SettleOutcome,
   now = new Date(),
 ): Promise<{ result: SettleResult; reference: string }> {
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const payment = await tx.transaction.findUnique({
       where: { id: transactionId },
       include: { booking: { select: { id: true, reference: true, status: true, expiresAt: true, totalPrice: true } } },

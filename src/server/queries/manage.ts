@@ -1,10 +1,10 @@
 import "server-only";
-import type { BookingStatus, DeviceStatus } from "@/generated/prisma/client";
+import type { BookingStatus, DeviceStatus } from "@/lib/db/types";
 import type { PricingRuleInput } from "@/lib/booking/pricing";
 import { getBusinessDay } from "@/lib/booking/schedule";
 import { addMinutes } from "@/lib/booking/time";
 import { toMinor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/server/db";
 import { CHECK_IN_EARLY_MINUTES, getOpenShift, NO_SHOW_GRACE_MINUTES } from "@/server/services/pos";
 import { getShiftSummary } from "@/server/services/shift";
 
@@ -19,7 +19,7 @@ const iso = (d: Date) => d.toISOString();
  * reservations); MAINTENANCE/OFFLINE come from the device row.
  */
 export async function getPosBoard(loungeId: string, now = new Date()) {
-  const lounge = await prisma.lounge.findUnique({
+  const lounge = await db.lounge.findUnique({
     where: { id: loungeId },
     include: {
       openingHours: true,
@@ -36,9 +36,9 @@ export async function getPosBoard(loungeId: string, now = new Date()) {
   const day = getBusinessDay(now, lounge.openingHours, lounge.timezone);
   const { start: dayStart, end: dayEnd } = day.range;
 
-  const openShift = await getOpenShift(prisma, loungeId);
+  const openShift = await getOpenShift(db, loungeId);
   const [bookings, queue, payments, canteenSales, shift] = await Promise.all([
-    prisma.booking.findMany({
+    db.booking.findMany({
       where: {
         loungeId,
         // Every running session (even one overrunning past close) plus everything on today's schedule.
@@ -56,7 +56,7 @@ export async function getPosBoard(loungeId: string, now = new Date()) {
         _count: { select: { extensions: true } },
       },
     }),
-    prisma.canteenOrder.findMany({
+    db.canteenOrder.findMany({
       where: {
         loungeId,
         status: { in: ["PENDING", "PREPARING"] },
@@ -69,12 +69,12 @@ export async function getPosBoard(loungeId: string, now = new Date()) {
         booking: { select: { reference: true, device: { select: { name: true } } } },
       },
     }),
-    prisma.transaction.groupBy({
+    db.transaction.groupBy({
       by: ["type"],
       where: { loungeId, status: "SUCCEEDED", type: { in: ["PAYMENT", "REFUND"] }, createdAt: { gte: dayStart, lt: dayEnd } },
       _sum: { amount: true },
     }),
-    prisma.canteenOrder.aggregate({
+    db.canteenOrder.aggregate({
       where: { loungeId, status: { not: "CANCELLED" }, createdAt: { gte: dayStart, lt: dayEnd } },
       _sum: { subtotal: true },
     }),

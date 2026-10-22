@@ -31,7 +31,7 @@ import { formatCountdown } from "@/components/manage/pos-ui";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
-import type { PriceTier } from "@/generated/prisma/enums";
+import type { PriceTier } from "@/lib/db/types";
 import { useI18n } from "@/i18n/client";
 import { formatDuration, formatTime, money } from "@/i18n/format";
 import { liveBill } from "@/lib/booking/live-bill";

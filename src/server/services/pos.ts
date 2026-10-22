@@ -1,5 +1,5 @@
 import "server-only";
-import type { BookingStatus, PriceTier, Prisma } from "@/generated/prisma/client";
+import type { BookingStatus, PriceTier, InputJsonValue } from "@/lib/db/types";
 import { WALK_IN_MIN_MINUTES } from "@/lib/booking/duration-input";
 import { PRICING_STEP_MINUTES, type PricingRuleInput } from "@/lib/booking/pricing";
 import { findContainingWindow, type Interval } from "@/lib/booking/schedule";
@@ -7,7 +7,7 @@ import { billableMinutes, pricePlay, tierBps, withDeviceRates, type PlayPricing,
 import { addMinutes, diffMinutes } from "@/lib/booking/time";
 import { computeBookingTotals, paymentStatusFor } from "@/lib/booking/totals";
 import { applyBps, fromMinor, toMinor, type Minor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db, type TxClient, type DbReader, type UpdateData } from "@/server/db";
 import { BLOCKING_STATUSES } from "@/server/queries/lounges";
 import { generateReference, isOverlapViolation, MAX_DURATION_MINUTES, releaseBookings } from "./booking";
 
@@ -88,10 +88,10 @@ export interface OrderLineInput {
   quantity: number;
 }
 
-type Tx = Prisma.TransactionClient;
+type Tx = TxClient;
 
 /** The lounge's open cashier shift (its cash drawer), if any. */
-export function getOpenShift(db: Tx | typeof prisma, loungeId: string) {
+export function getOpenShift(db: Tx | DbReader, loungeId: string) {
   return db.shift.findFirst({ where: { loungeId, status: "OPEN" } });
 }
 
@@ -108,7 +108,7 @@ function floorToMinute(d: Date): Date {
 }
 
 async function loadLounge(loungeId: string) {
-  const lounge = await prisma.lounge.findUnique({
+  const lounge = await db.lounge.findUnique({
     where: { id: loungeId },
     select: {
       id: true,
@@ -152,7 +152,7 @@ export function pricedDevice(device: {
   );
 }
 
-function audit(tx: Tx, ctx: PosContext, action: string, entityType: string, entityId: string, data?: Prisma.InputJsonValue) {
+function audit(tx: Tx, ctx: PosContext, action: string, entityType: string, entityId: string, data?: InputJsonValue) {
   return tx.auditLog.create({ data: { actorId: ctx.actorId, loungeId: ctx.loungeId, action, entityType, entityId, data } });
 }
 
@@ -169,7 +169,7 @@ async function getBookingFor(tx: Tx, ctx: PosContext, bookingId: string, statuse
 }
 
 /** Applies `data` only if nobody changed the booking since it was read. */
-async function guardedUpdate(tx: Tx, booking: { id: string; version: number }, data: Prisma.BookingUncheckedUpdateManyInput) {
+async function guardedUpdate(tx: Tx, booking: { id: string; version: number }, data: UpdateData<"Booking">) {
   const res = await tx.booking.updateMany({
     where: { id: booking.id, version: booking.version },
     data: { ...data, version: { increment: 1 } },
@@ -307,7 +307,7 @@ export async function startWalkIn(ctx: PosContext, input: StartWalkInInput) {
   const mode = input.mode ?? "FIXED";
   const tier = input.priceTier ?? "SINGLE";
   const lounge = await loadLounge(ctx.loungeId);
-  const device = await prisma.device.findFirst({
+  const device = await db.device.findFirst({
     where: { id: input.deviceId, loungeId: ctx.loungeId, archivedAt: null },
     include: { category: true },
   });
@@ -344,7 +344,7 @@ export async function startWalkIn(ctx: PosContext, input: StartWalkInInput) {
   const reference = generateReference();
 
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await db.$transaction(async (tx) => {
       const expired = await tx.booking.findMany({
         where: { deviceId: device.id, status: "PENDING", expiresAt: { lte: now } },
         select: { id: true },
@@ -401,7 +401,7 @@ export async function startWalkIn(ctx: PosContext, input: StartWalkInInput) {
 /** Seats a confirmed booking: CONFIRMED -> ACTIVE. */
 export async function checkIn(ctx: PosContext, input: { bookingId: string; version: number }) {
   const now = ctx.now ?? new Date();
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const booking = await getBookingFor(tx, ctx, input.bookingId, ["CONFIRMED"], input.version);
     if (now < addMinutes(booking.scheduledStart, -CHECK_IN_EARLY_MINUTES)) throw new PosError("TOO_EARLY");
     if (now >= booking.scheduledEnd) throw new PosError("INVALID_STATE");
@@ -427,7 +427,7 @@ export async function extendSession(ctx: PosContext, input: { bookingId: string;
   const lounge = await loadLounge(ctx.loungeId);
 
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await db.$transaction(async (tx) => {
       const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
       // Open sessions have no end to extend.
       if (booking.mode !== "FIXED") throw new PosError("INVALID_STATE");
@@ -465,7 +465,7 @@ export async function extendSession(ctx: PosContext, input: { bookingId: string;
 export async function changeTier(ctx: PosContext, input: { bookingId: string; version: number; tier: PriceTier }) {
   const now = ctx.now ?? new Date();
   const lounge = await loadLounge(ctx.loungeId);
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
     const category = pricedDevice(booking.device);
     requireTier(category, input.tier);
@@ -499,7 +499,7 @@ export async function changeTier(ctx: PosContext, input: { bookingId: string; ve
 export async function pauseSession(ctx: PosContext, input: { bookingId: string; version: number }) {
   const now = ctx.now ?? new Date();
   const lounge = await loadLounge(ctx.loungeId);
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
     if (booking.pausedAt) throw new PosError("INVALID_STATE");
     await closeSegment(tx, lounge, booking.id, booking.mode, now);
@@ -516,7 +516,7 @@ export async function resumeSession(ctx: PosContext, input: { bookingId: string;
   const now = ctx.now ?? new Date();
   const lounge = await loadLounge(ctx.loungeId);
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await db.$transaction(async (tx) => {
       const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
       if (!booking.pausedAt) throw new PosError("INVALID_STATE");
       const paused = billableMinutes(booking.pausedAt, now);
@@ -555,7 +555,7 @@ export async function transferSession(ctx: PosContext, input: { bookingId: strin
   const start = floorToMinute(now);
   const lounge = await loadLounge(ctx.loungeId);
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await db.$transaction(async (tx) => {
       const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
       if (booking.pausedAt) throw new PosError("INVALID_STATE");
       if (booking.deviceId === input.targetDeviceId) throw new PosError("INVALID_STATE");
@@ -649,7 +649,7 @@ export async function endSession(ctx: PosContext, input: EndSessionInput) {
   const now = ctx.now ?? new Date();
   const lounge = await loadLounge(ctx.loungeId);
   try {
-    return await prisma.$transaction(async (tx) => {
+    return await db.$transaction(async (tx) => {
       const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"], input.version);
       const started = booking.actualStart ?? booking.scheduledStart;
       let until = now;
@@ -719,7 +719,7 @@ export async function endSession(ctx: PosContext, input: EndSessionInput) {
 /** Confirmed booking whose guest never came. Pre-orders are restocked; payments are kept. */
 export async function markNoShow(ctx: PosContext, input: { bookingId: string; version: number }) {
   const now = ctx.now ?? new Date();
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const booking = await getBookingFor(tx, ctx, input.bookingId, ["CONFIRMED"], input.version);
     if (now < addMinutes(booking.scheduledStart, NO_SHOW_GRACE_MINUTES)) throw new PosError("TOO_EARLY");
     await guardedUpdate(tx, booking, {});
@@ -732,7 +732,7 @@ export async function markNoShow(ctx: PosContext, input: { bookingId: string; ve
 /** Staff cancellation of an unpaid upcoming booking. Paid bookings need a refund first. */
 export async function cancelBooking(ctx: PosContext, input: { bookingId: string; version: number }) {
   const now = ctx.now ?? new Date();
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const booking = await getBookingFor(tx, ctx, input.bookingId, ["PENDING", "CONFIRMED"], input.version);
     if (toMinor(booking.amountPaid) > 0) throw new PosError("PAID_BOOKING");
     await guardedUpdate(tx, booking, {});
@@ -786,7 +786,7 @@ function orderItemsData(lines: Awaited<ReturnType<typeof reserveLines>>["lines"]
 /** Adds snacks/drinks to a running session's bill. */
 export async function addSessionOrder(ctx: PosContext, input: { bookingId: string; items: OrderLineInput[]; notes?: string }) {
   const lounge = await loadLounge(ctx.loungeId);
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const booking = await getBookingFor(tx, ctx, input.bookingId, ["ACTIVE"]);
     const { lines, subtotal } = await reserveLines(tx, ctx.loungeId, input.items);
     const orderTax = applyBps(subtotal, lounge.taxRateBps);
@@ -820,7 +820,7 @@ export async function addSessionOrder(ctx: PosContext, input: { bookingId: strin
 /** Walk-up counter sale with no seat, paid on the spot (split payments allowed). */
 export async function counterSale(ctx: PosContext, input: { items: OrderLineInput[]; payments: PaymentPart[]; notes?: string }) {
   const lounge = await loadLounge(ctx.loungeId);
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const { lines, subtotal } = await reserveLines(tx, ctx.loungeId, input.items);
     const tax = applyBps(subtotal, lounge.taxRateBps);
     const total = subtotal + tax;
@@ -857,7 +857,7 @@ export async function counterSale(ctx: PosContext, input: { items: OrderLineInpu
 
 export async function markOrderServed(ctx: PosContext, input: { orderId: string }) {
   const now = ctx.now ?? new Date();
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const res = await tx.canteenOrder.updateMany({
       where: { id: input.orderId, loungeId: ctx.loungeId, status: { in: ["PENDING", "PREPARING"] } },
       data: { status: "SERVED", servedAt: now },
@@ -873,7 +873,7 @@ export async function markOrderServed(ctx: PosContext, input: { orderId: string 
 /** Voids an unserved order on a seat's bill and restocks it. Counter sales are already paid and can't be voided here. */
 export async function cancelSessionOrder(ctx: PosContext, input: { orderId: string }) {
   const lounge = await loadLounge(ctx.loungeId);
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const order = await tx.canteenOrder.findFirst({
       where: { id: input.orderId, loungeId: ctx.loungeId },
       include: { items: true },
@@ -915,7 +915,7 @@ export type SettableDeviceStatus = "IDLE" | "MAINTENANCE" | "OFFLINE";
 
 /** Takes a device out of service or back in. A seat with a running session can't be taken out. */
 export async function setDeviceStatus(ctx: PosContext, input: { deviceId: string; status: SettableDeviceStatus }) {
-  return prisma.$transaction(async (tx) => {
+  return db.$transaction(async (tx) => {
     const device = await tx.device.findFirst({ where: { id: input.deviceId, loungeId: ctx.loungeId } });
     if (!device) throw new PosError("NOT_FOUND");
     const active = await tx.booking.count({ where: { deviceId: device.id, status: "ACTIVE" } });

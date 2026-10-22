@@ -11,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import type { MenuItemCategory } from "@/generated/prisma/enums";
+import type { MenuItemCategory } from "@/lib/db/types";
 import { useI18n } from "@/i18n/client";
 import { localName, money } from "@/i18n/format";
 import type { Minor } from "@/lib/money";

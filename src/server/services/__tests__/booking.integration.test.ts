@@ -1,7 +1,7 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays, addMinutes, toLocalIsoDate, zonedTimeToUtc } from "@/lib/booking/time";
 import { toMinor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/server/db";
 import { BookingError, createBooking, settlePayment, type CreateBookingInput } from "../booking";
 
 const SLUG = "nexus-downtown";
@@ -36,36 +36,36 @@ async function expectCode(promise: Promise<unknown>, code: BookingError["code"])
 }
 
 async function stockOf(id: string) {
-  return (await prisma.menuItem.findUniqueOrThrow({ where: { id } })).stockQuantity;
+  return (await db.menuItem.findUniqueOrThrow({ where: { id } })).stockQuantity;
 }
 
 async function cleanup() {
-  const user = await prisma.user.findUnique({ where: { email: TEST_EMAIL } });
+  const user = await db.user.findUnique({ where: { email: TEST_EMAIL } });
   if (!user) return;
-  const bookings = await prisma.booking.findMany({ where: { customerId: user.id }, select: { id: true } });
+  const bookings = await db.booking.findMany({ where: { customerId: user.id }, select: { id: true } });
   const ids = bookings.map((b) => b.id);
-  await prisma.transaction.deleteMany({ where: { bookingId: { in: ids } } });
-  await prisma.canteenOrder.deleteMany({ where: { bookingId: { in: ids } } });
-  await prisma.booking.deleteMany({ where: { id: { in: ids } } });
-  await prisma.user.delete({ where: { id: user.id } });
+  await db.transaction.deleteMany({ where: { bookingId: { in: ids } } });
+  await db.canteenOrder.deleteMany({ where: { bookingId: { in: ids } } });
+  await db.booking.deleteMany({ where: { id: { in: ids } } });
+  await db.user.delete({ where: { id: user.id } });
 }
 
 beforeAll(async () => {
   await cleanup();
-  customerId = (await prisma.user.create({ data: { email: TEST_EMAIL, name: "Integration Test" } })).id;
-  const lounge = await prisma.lounge.findUniqueOrThrow({
+  customerId = (await db.user.create({ data: { email: TEST_EMAIL, name: "Integration Test" } })).id;
+  const lounge = await db.lounge.findUniqueOrThrow({
     where: { slug: SLUG },
     include: { devices: true, menuItems: true },
   });
   devices = Object.fromEntries(lounge.devices.map((d) => [d.code, d.id]));
   redBullId = lounge.menuItems.find((m) => m.sku === "DRK-RB250")!.id;
   // Known stock for assertions.
-  await prisma.menuItem.update({ where: { id: redBullId }, data: { stockQuantity: 10 } });
+  await db.menuItem.update({ where: { id: redBullId }, data: { stockQuantity: 10 } });
 });
 
 afterAll(async () => {
   await cleanup();
-  await prisma.$disconnect();
+  await db.$disconnect();
 });
 
 describe("createBooking", () => {
@@ -73,7 +73,7 @@ describe("createBooking", () => {
     const result = await createBooking(input({ addOns: [{ menuItemId: redBullId, quantity: 2 }] }));
     expect(result.redirectUrl).toBe(`/ar/bookings/${result.reference}`);
 
-    const booking = await prisma.booking.findUniqueOrThrow({
+    const booking = await db.booking.findUniqueOrThrow({
       where: { reference: result.reference },
       include: { canteenOrders: { include: { items: true } } },
     });
@@ -118,7 +118,7 @@ describe("online checkout", () => {
     const result = await createBooking(input({ deviceId: devices.PC02, checkoutMethod: "ZAINCASH" }));
     expect(result.redirectUrl).toMatch(/^\/ar\/checkout\/.+/);
 
-    const pending = await prisma.booking.findUniqueOrThrow({
+    const pending = await db.booking.findUniqueOrThrow({
       where: { reference: result.reference },
       include: { transactions: true },
     });
@@ -131,7 +131,7 @@ describe("online checkout", () => {
     await expect(settlePayment(txId, "approved")).resolves.toMatchObject({ result: "PAID" });
     await expect(settlePayment(txId, "approved")).resolves.toMatchObject({ result: "ALREADY_PROCESSED" });
 
-    const paid = await prisma.booking.findUniqueOrThrow({ where: { id: pending.id } });
+    const paid = await db.booking.findUniqueOrThrow({ where: { id: pending.id } });
     expect(paid).toMatchObject({ status: "CONFIRMED", paymentStatus: "PAID", expiresAt: null });
     expect(toMinor(paid.amountPaid)).toBe(toMinor(paid.totalPrice));
   });
@@ -143,10 +143,10 @@ describe("online checkout", () => {
     );
     expect(await stockOf(redBullId)).toBe(before! - 3);
 
-    const tx = await prisma.transaction.findFirstOrThrow({ where: { booking: { reference: result.reference } } });
+    const tx = await db.transaction.findFirstOrThrow({ where: { booking: { reference: result.reference } } });
     await expect(settlePayment(tx.id, "declined")).resolves.toMatchObject({ result: "DECLINED" });
 
-    const booking = await prisma.booking.findUniqueOrThrow({
+    const booking = await db.booking.findUniqueOrThrow({
       where: { reference: result.reference },
       include: { canteenOrders: true },
     });
@@ -166,7 +166,7 @@ describe("online checkout", () => {
     const fresh = await createBooking(input({ deviceId: devices.PC04 }));
     expect(fresh.reference).not.toBe(stale.reference);
 
-    const released = await prisma.booking.findUniqueOrThrow({
+    const released = await db.booking.findUniqueOrThrow({
       where: { reference: stale.reference },
       include: { transactions: true },
     });

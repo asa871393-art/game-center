@@ -1,7 +1,7 @@
 import "server-only";
 import { isFirebaseStorageEnabled } from "@/lib/env";
 import { toMinor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/server/db";
 
 export type StockState = "UNLIMITED" | "IN_STOCK" | "LOW" | "OUT";
 
@@ -15,7 +15,7 @@ const SALES_WINDOW_DAYS = 30;
 
 /** Everything the menu management screen needs for one lounge, serializable. */
 export async function getMenuAdmin(loungeId: string, now = new Date()) {
-  const lounge = await prisma.lounge.findUnique({
+  const lounge = await db.lounge.findUnique({
     where: { id: loungeId },
     select: {
       id: true,
@@ -29,12 +29,12 @@ export async function getMenuAdmin(loungeId: string, now = new Date()) {
 
   const since = new Date(now.getTime() - SALES_WINDOW_DAYS * 86_400_000);
   const [sold, history] = await Promise.all([
-    prisma.canteenOrderItem.groupBy({
+    db.canteenOrderItem.groupBy({
       by: ["menuItemId"],
       where: { order: { loungeId, status: { not: "CANCELLED" }, createdAt: { gte: since } } },
       _sum: { quantity: true },
     }),
-    prisma.canteenOrderItem.groupBy({ by: ["menuItemId"], where: { order: { loungeId } }, _count: { _all: true } }),
+    db.canteenOrderItem.groupBy({ by: ["menuItemId"], where: { order: { loungeId } }, _count: { _all: true } }),
   ]);
   const soldOf = (id: string) => sold.find((s) => s.menuItemId === id)?._sum.quantity ?? 0;
   const hasHistory = (id: string) => history.some((h) => h.menuItemId === id);

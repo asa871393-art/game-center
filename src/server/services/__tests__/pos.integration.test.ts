@@ -1,8 +1,8 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { addDays, addMinutes, toLocalIsoDate, zonedTimeToUtc } from "@/lib/booking/time";
 import { toMinor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
-import type { PriceTier } from "@/generated/prisma/client";
+import { db } from "@/server/db";
+import type { PriceTier } from "@/lib/db/types";
 import { pricePlay } from "@/lib/booking/session-billing";
 import { getReceipt } from "@/server/queries/receipt";
 import { getLoungeAccess, hasLoungeRole } from "@/server/staff";
@@ -48,9 +48,9 @@ async function expectCode(promise: Promise<unknown>, code: PosError["code"]) {
   await expect(promise).rejects.toSatisfy((e) => e instanceof PosError && e.code === code);
 }
 
-const stockOf = async (id: string) => (await prisma.menuItem.findUniqueOrThrow({ where: { id } })).stockQuantity;
-const bookingOf = (id: string) => prisma.booking.findUniqueOrThrow({ where: { id } });
-const deviceStatusOf = async (id: string) => (await prisma.device.findUniqueOrThrow({ where: { id } })).status;
+const stockOf = async (id: string) => (await db.menuItem.findUniqueOrThrow({ where: { id } })).stockQuantity;
+const bookingOf = (id: string) => db.booking.findUniqueOrThrow({ where: { id } });
+const deviceStatusOf = async (id: string) => (await db.device.findUniqueOrThrow({ where: { id } })).status;
 
 function expectConsistentTotals(b: Awaited<ReturnType<typeof bookingOf>>) {
   expect(toMinor(b.totalPrice)).toBe(
@@ -59,29 +59,29 @@ function expectConsistentTotals(b: Awaited<ReturnType<typeof bookingOf>>) {
 }
 
 async function cleanup() {
-  const lounge = await prisma.lounge.findUnique({ where: { slug: SLUG }, select: { id: true } });
-  const staff = await prisma.user.findUnique({ where: { email: "staff@gamelounge.dev" }, select: { id: true } });
-  const customer = await prisma.user.findUnique({ where: { email: TEST_EMAIL }, select: { id: true } });
+  const lounge = await db.lounge.findUnique({ where: { slug: SLUG }, select: { id: true } });
+  const staff = await db.user.findUnique({ where: { email: "staff@gamelounge.dev" }, select: { id: true } });
+  const customer = await db.user.findUnique({ where: { email: TEST_EMAIL }, select: { id: true } });
   if (!lounge || !staff) return;
 
-  const bookings = await prisma.booking.findMany({
+  const bookings = await db.booking.findMany({
     where: { loungeId: lounge.id, OR: [{ createdById: staff.id }, ...(customer ? [{ customerId: customer.id }] : [])] },
     select: { id: true },
   });
   const bookingIds = bookings.map((b) => b.id);
-  const counterOrders = await prisma.canteenOrder.findMany({
+  const counterOrders = await db.canteenOrder.findMany({
     where: { loungeId: lounge.id, createdById: staff.id, bookingId: null },
     select: { id: true },
   });
   const orderIds = counterOrders.map((o) => o.id);
 
-  await prisma.transaction.deleteMany({ where: { OR: [{ bookingId: { in: bookingIds } }, { canteenOrderId: { in: orderIds } }] } });
-  await prisma.canteenOrder.deleteMany({ where: { OR: [{ bookingId: { in: bookingIds } }, { id: { in: orderIds } }] } });
-  await prisma.booking.deleteMany({ where: { id: { in: bookingIds } } });
-  await prisma.auditLog.deleteMany({ where: { loungeId: lounge.id, actorId: staff.id } });
-  await prisma.shift.deleteMany({ where: { loungeId: lounge.id } });
-  await prisma.device.updateMany({ where: { loungeId: lounge.id, code: { in: TEST_DEVICES } }, data: { status: "IDLE" } });
-  if (customer) await prisma.user.delete({ where: { id: customer.id } });
+  await db.transaction.deleteMany({ where: { OR: [{ bookingId: { in: bookingIds } }, { canteenOrderId: { in: orderIds } }] } });
+  await db.canteenOrder.deleteMany({ where: { OR: [{ bookingId: { in: bookingIds } }, { id: { in: orderIds } }] } });
+  await db.booking.deleteMany({ where: { id: { in: bookingIds } } });
+  await db.auditLog.deleteMany({ where: { loungeId: lounge.id, actorId: staff.id } });
+  await db.shift.deleteMany({ where: { loungeId: lounge.id } });
+  await db.device.updateMany({ where: { loungeId: lounge.id, code: { in: TEST_DEVICES } }, data: { status: "IDLE" } });
+  if (customer) await db.user.delete({ where: { id: customer.id } });
 }
 
 let shiftId: string;
@@ -89,23 +89,23 @@ const OPENING_FLOAT = 5_000_000; // 50,000 IQD
 
 beforeAll(async () => {
   await cleanup();
-  const lounge = await prisma.lounge.findUniqueOrThrow({
+  const lounge = await db.lounge.findUniqueOrThrow({
     where: { slug: SLUG },
     include: { devices: true, menuItems: true },
   });
   loungeId = lounge.id;
   devices = Object.fromEntries(lounge.devices.map((d) => [d.code, d.id]));
   redBullId = lounge.menuItems.find((m) => m.sku === "DRK-RB250")!.id;
-  staffId = (await prisma.user.findUniqueOrThrow({ where: { email: "staff@gamelounge.dev" } })).id;
-  customerId = (await prisma.user.create({ data: { email: TEST_EMAIL, name: "POS Test Guest" } })).id;
-  await prisma.menuItem.update({ where: { id: redBullId }, data: { stockQuantity: 10 } });
+  staffId = (await db.user.findUniqueOrThrow({ where: { email: "staff@gamelounge.dev" } })).id;
+  customerId = (await db.user.create({ data: { email: TEST_EMAIL, name: "POS Test Guest" } })).id;
+  await db.menuItem.update({ where: { id: redBullId }, data: { stockQuantity: 10 } });
   // Counter payments need an open shift (the cash drawer).
   shiftId = (await openShift({ loungeId, actorId: staffId }, { openingFloat: OPENING_FLOAT })).id;
 });
 
 afterAll(async () => {
   await cleanup();
-  await prisma.$disconnect();
+  await db.$disconnect();
 });
 
 /** A confirmed pay-at-lounge online booking for the test customer. */
@@ -121,7 +121,7 @@ async function onlineBooking(deviceCode: string, start: Date, minutes = 60, addO
     checkoutMethod: "PAY_AT_LOUNGE",
     locale: "en",
   });
-  return prisma.booking.findUniqueOrThrow({ where: { reference } });
+  return db.booking.findUniqueOrThrow({ where: { reference } });
 }
 
 describe("lounge access", () => {
@@ -131,7 +131,7 @@ describe("lounge access", () => {
     expect(hasLoungeRole(staff!, "STAFF")).toBe(true);
     expect(hasLoungeRole(staff!, "MANAGER")).toBe(false);
 
-    const admin = await prisma.user.findUniqueOrThrow({ where: { email: "admin@gamelounge.dev" } });
+    const admin = await db.user.findUniqueOrThrow({ where: { email: "admin@gamelounge.dev" } });
     expect((await getLoungeAccess(admin.id, loungeId))?.role).toBe("OWNER");
     expect(await getLoungeAccess(customerId, loungeId)).toBeNull();
   });
@@ -163,7 +163,7 @@ describe("walk-in session lifecycle", () => {
     expect(toMinor(after.playSubtotal)).toBe(toMinor(before.playSubtotal) + price);
     expect(after.version).toBe(before.version + 1);
     expectConsistentTotals(after);
-    expect(await prisma.bookingExtension.count({ where: { bookingId } })).toBe(1);
+    expect(await db.bookingExtension.count({ where: { bookingId } })).toBe(1);
 
     await expectCode(extendSession(ctxAt(at(18, 31)), { bookingId, version: before.version, minutes: 30 }), "STALE");
   });
@@ -212,10 +212,10 @@ describe("walk-in session lifecycle", () => {
     const done = await bookingOf(bookingId);
     expect(done).toMatchObject({ status: "COMPLETED", paymentStatus: "PAID" });
     expect(toMinor(done.amountPaid)).toBe(due);
-    const tx = await prisma.transaction.findFirstOrThrow({ where: { bookingId } });
+    const tx = await db.transaction.findFirstOrThrow({ where: { bookingId } });
     expect(tx).toMatchObject({ method: "CARD", status: "SUCCEEDED", processedById: staffId });
     expect(await deviceStatusOf(devices.PC02)).toBe("IDLE");
-    expect(await prisma.auditLog.count({ where: { entityId: bookingId } })).toBeGreaterThanOrEqual(3);
+    expect(await db.auditLog.count({ where: { entityId: bookingId } })).toBeGreaterThanOrEqual(3);
   });
 });
 
@@ -260,11 +260,11 @@ describe("canteen counter", () => {
       payments: [{ method: "CASH", amount: 2500 * 100 }],
     });
     expect(total).toBeGreaterThanOrEqual(2500 * 100);
-    const tx = await prisma.transaction.findFirstOrThrow({ where: { canteenOrderId: orderId } });
+    const tx = await db.transaction.findFirstOrThrow({ where: { canteenOrderId: orderId } });
     expect(toMinor(tx.amount)).toBe(total);
 
     await markOrderServed(ctxAt(at(18, 5)), { orderId });
-    expect((await prisma.canteenOrder.findUniqueOrThrow({ where: { id: orderId } })).status).toBe("SERVED");
+    expect((await db.canteenOrder.findUniqueOrThrow({ where: { id: orderId } })).status).toBe("SERVED");
     await expectCode(markOrderServed(ctxAt(at(18, 6)), { orderId }), "INVALID_STATE");
     await expectCode(cancelSessionOrder(ctxAt(at(18, 6)), { orderId }), "INVALID_STATE");
   });
@@ -290,8 +290,8 @@ describe("device status", () => {
 
 /** Expected price of play on a device code, using the same pricing function the server uses. */
 async function priceOf(code: string, tier: PriceTier, start: Date, minutes: number) {
-  const device = await prisma.device.findUniqueOrThrow({ where: { id: devices[code] }, include: { category: true } });
-  const lounge = await prisma.lounge.findUniqueOrThrow({ where: { id: loungeId }, include: { pricingRules: { where: { isActive: true } } } });
+  const device = await db.device.findUniqueOrThrow({ where: { id: devices[code] }, include: { category: true } });
+  const lounge = await db.lounge.findUniqueOrThrow({ where: { id: loungeId }, include: { pricingRules: { where: { isActive: true } } } });
   const rules = lounge.pricingRules.map((r) => ({ ...r, hourlyRate: r.hourlyRate === null ? null : toMinor(r.hourlyRate) }));
   const c = device.category;
   return pricePlay(
@@ -303,7 +303,7 @@ async function priceOf(code: string, tier: PriceTier, start: Date, minutes: numb
   );
 }
 
-const segmentsOf = (bookingId: string) => prisma.sessionSegment.findMany({ where: { bookingId }, orderBy: { startedAt: "asc" } });
+const segmentsOf = (bookingId: string) => db.sessionSegment.findMany({ where: { bookingId }, orderBy: { startedAt: "asc" } });
 
 describe("POS terminal: open sessions, tiers, pause, transfer, split payment", () => {
   let bookingId: string;
@@ -425,7 +425,7 @@ describe("POS terminal: open sessions, tiers, pause, transfer, split payment", (
     expect(done.scheduledEnd).toEqual(billUntil);
     expect(await deviceStatusOf(devices.PS5B)).toBe("IDLE");
 
-    const txs = await prisma.transaction.findMany({ where: { bookingId }, orderBy: { method: "asc" } });
+    const txs = await db.transaction.findMany({ where: { bookingId }, orderBy: { method: "asc" } });
     expect(txs.map((t) => t.method).sort()).toEqual(["CASH", "ZAINCASH"]);
     expect(txs.find((t) => t.method === "CASH")!.metadata).toEqual({ tendered: 1_500_000, change: 500_000 });
 
@@ -528,7 +528,7 @@ describe("discounts and FastPay at checkout", () => {
     const done = await bookingOf(id);
     expect(toMinor(done.discountTotal)).toBe(discount);
     expectConsistentTotals(done);
-    const tx = await prisma.transaction.findFirstOrThrow({ where: { bookingId: id } });
+    const tx = await db.transaction.findFirstOrThrow({ where: { bookingId: id } });
     expect(tx).toMatchObject({ method: "FASTPAY", shiftId });
     expect((await getReceipt(id))!.discount).toBe(discount);
   });
@@ -540,15 +540,15 @@ describe("cashier shift and cash drawer", () => {
   });
 
   it("attaches every counter payment to the open shift and sums the drawer", async () => {
-    const untagged = await prisma.transaction.count({
+    const untagged = await db.transaction.count({
       where: { loungeId, processedById: staffId, status: "SUCCEEDED", shiftId: null, method: { not: "ONLINE" } },
     });
     expect(untagged).toBe(0);
 
-    const cashRows = await prisma.transaction.findMany({ where: { shiftId, method: "CASH", type: "PAYMENT", status: "SUCCEEDED" } });
+    const cashRows = await db.transaction.findMany({ where: { shiftId, method: "CASH", type: "PAYMENT", status: "SUCCEEDED" } });
     const cash = cashRows.reduce((s, t) => s + toMinor(t.amount), 0);
     expect(cash).toBeGreaterThan(0);
-    expect(await shiftCashNet(prisma, shiftId)).toBe(cash);
+    expect(await shiftCashNet(db, shiftId)).toBe(cash);
 
     const summary = (await getShiftSummary(shiftId))!;
     expect(summary).toMatchObject({ status: "OPEN", openingFloat: OPENING_FLOAT, cashNet: cash, expectedCash: OPENING_FLOAT + cash });

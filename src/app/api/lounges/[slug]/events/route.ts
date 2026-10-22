@@ -1,5 +1,5 @@
 import { NextResponse, type NextRequest } from "next/server";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/server/db";
 import { loungeEventStream } from "@/server/sse";
 
 /**
@@ -9,7 +9,7 @@ import { loungeEventStream } from "@/server/sse";
  */
 export async function GET(request: NextRequest, ctx: RouteContext<"/api/lounges/[slug]/events">) {
   const { slug } = await ctx.params;
-  const lounge = await prisma.lounge.findFirst({ where: { slug, status: "ACTIVE" }, select: { id: true } });
+  const lounge = await db.lounge.findFirst({ where: { slug, status: "ACTIVE" }, select: { id: true } });
   if (!lounge) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
   return loungeEventStream(request.signal, lounge.id, (event) =>

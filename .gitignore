@@ -41,8 +41,11 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-/src/generated/prisma
 
 # editor skill links (junctions to .agents/skills, machine-specific)
 /.claude/skills/
 /.windsurf/skills/
+
+# Firebase emulator logs
+firebase-debug.log
+firestore-debug.log

@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
-import type { DeviceStatus, PaymentStatus } from "@/generated/prisma/enums";
+import type { DeviceStatus, PaymentStatus } from "@/lib/db/types";
 import { useI18n } from "@/i18n/client";
 import { cn } from "@/lib/utils";
 

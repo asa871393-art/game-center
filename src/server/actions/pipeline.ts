@@ -2,7 +2,7 @@ import "server-only";
 import { refresh } from "next/cache";
 import { z } from "zod";
 import { auth } from "@/auth";
-import type { LoungeMemberRole } from "@/generated/prisma/client";
+import type { LoungeMemberRole } from "@/lib/db/types";
 import { getDictionaryFor } from "@/i18n/server";
 import { PosError, type PosContext, type PosErrorCode } from "@/server/services/pos";
 import { getLoungeAccess, hasLoungeRole } from "@/server/staff";

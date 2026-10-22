@@ -6,7 +6,7 @@ import { isLocale, type Locale } from "@/i18n/config";
 import type { Dictionary } from "@/i18n/dictionaries/ar";
 import { format } from "@/i18n/format";
 import { getDictionaryFor } from "@/i18n/server";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/server/db";
 import {
   BookingError,
   createBooking,
@@ -88,7 +88,7 @@ export async function completeSandboxPaymentAction(
   if (!session?.user?.id) return { ok: false, error: dict.errors.unauthenticated, code: "UNAUTHENTICATED" };
   if (outcome !== "approved" && outcome !== "declined") return { ok: false, error: dict.errors.validation };
 
-  const payment = await prisma.transaction.findUnique({
+  const payment = await db.transaction.findUnique({
     where: { id: transactionId },
     select: { userId: true, provider: true, providerRef: true },
   });

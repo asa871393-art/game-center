@@ -1,4 +1,4 @@
-import type { PriceTier, SessionMode } from "@/generated/prisma/enums";
+import type { PriceTier, SessionMode } from "@/lib/db/types";
 import type { PricingRuleInput } from "./pricing";
 import { accruedPlay, playedMinutes, type PricedCategory } from "./session-billing";
 import { computeBookingTotals } from "./totals";

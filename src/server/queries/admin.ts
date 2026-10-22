@@ -1,7 +1,7 @@
 import "server-only";
 import { addMinutes } from "@/lib/booking/time";
 import { applyBps, toMinor } from "@/lib/money";
-import { prisma } from "@/lib/prisma";
+import { db } from "@/server/db";
 
 export const ADMIN_PERIOD_DAYS = 30;
 
@@ -15,7 +15,7 @@ export async function getPlatformOverview(now = new Date()) {
   const since = addMinutes(now, -ADMIN_PERIOD_DAYS * 24 * 60);
 
   const [organizations, payments, activeSessions, bookings30d] = await Promise.all([
-    prisma.organization.findMany({
+    db.organization.findMany({
       orderBy: { name: "asc" },
       include: {
         owner: { select: { name: true, email: true } },
@@ -26,13 +26,13 @@ export async function getPlatformOverview(now = new Date()) {
         },
       },
     }),
-    prisma.transaction.groupBy({
+    db.transaction.groupBy({
       by: ["loungeId", "method", "type"],
       where: { status: "SUCCEEDED", type: { in: ["PAYMENT", "REFUND"] }, createdAt: { gte: since }, loungeId: { not: null } },
       _sum: { amount: true },
     }),
-    prisma.booking.groupBy({ by: ["loungeId"], where: { status: "ACTIVE" }, _count: { _all: true } }),
-    prisma.booking.groupBy({
+    db.booking.groupBy({ by: ["loungeId"], where: { status: "ACTIVE" }, _count: { _all: true } }),
+    db.booking.groupBy({
       by: ["loungeId"],
       where: { createdAt: { gte: since }, status: { notIn: ["CANCELLED"] } },
       _count: { _all: true },

@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { connection } from "next/server";
 import { Suspense } from "react";
 import { isDeviceType } from "@/components/lounge/device-type";
 import { LoungeCard } from "@/components/lounge/lounge-card";
@@ -42,6 +43,8 @@ export default async function LoungesPage({ searchParams }: PageProps<"/[locale]
 
 async function Results({ searchParams }: Pick<PageProps<"/[locale]/lounges">, "searchParams">) {
   const sp = await searchParams;
+  // Firestore reads are request-time (the SDK uses random request ids).
+  await connection();
   const q = firstParam(sp.q);
   const city = firstParam(sp.city);
   const rawType = firstParam(sp.type);
