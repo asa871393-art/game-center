@@ -221,6 +221,8 @@ const en: Dictionary = {
   errors: {
     managersOnly: "This page is for managers and owners only",
     managersOnlyHint: "You're signed in as {email}, which can't open it. Sign in with a manager or owner account to continue.",
+    staffOnly: "The POS is for lounge staff only",
+    staffOnlyHint: "You're signed in as {email}, which isn't on any lounge's staff. Sign in with a cashier or manager account to continue.",
     switchAccount: "Sign in with another account",
     generic: "Something went wrong. Please try again.",
     validation: "Please check the highlighted fields.",
@@ -409,6 +411,7 @@ const en: Dictionary = {
   },
   pos: {
     title: "Point of sale",
+    controlTitle: "Point of sale & control",
     addDiscount: "Add discount",
     noDiscount: "No discount",
     clearCart: "Clear",
@@ -499,6 +502,7 @@ const en: Dictionary = {
     extension: "Extension",
     discount: "Discount",
     thanks: "Thanks for playing! See you soon",
+    qrLabel: "Scan to book again",
     paymentMethod: { CASH: "Cash", CARD: "Card", WALLET: "Wallet", ONLINE: "Online", ZAINCASH: "ZainCash", FASTPAY: "FastPay" },
   },
   shift: {
@@ -512,6 +516,7 @@ const en: Dictionary = {
     closed: "Shift closed",
     since: "since",
     cashInDrawer: "Cash in drawer",
+    elapsed: "Shift time",
     requiredToPay: "Open a shift first to take payments.",
     sessions: "Sessions checked out",
     counterSales: "Counter sales",

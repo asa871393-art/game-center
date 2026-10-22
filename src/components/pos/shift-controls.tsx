@@ -3,6 +3,7 @@
 import { CheckCircle2, HandCoins, Loader2, LockKeyhole, Minus, Plus, Printer, Undo2, Unlock } from "lucide-react";
 import { useState } from "react";
 import { usePos, usePosAction } from "@/components/manage/pos-context";
+import { formatCountdown } from "@/components/manage/pos-ui";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
@@ -32,8 +33,8 @@ function parseMoney(raw: string): Minor | null {
   }
 }
 
-/** Top-bar shift block: cashier, shift start, live cash in drawer, and open/close actions. */
-export function ShiftBar() {
+/** Top-bar shift block: cashier, shift start and running time, live cash in drawer, and open/close actions. */
+export function ShiftBar({ now }: { now: Date }) {
   const { dict, locale } = useI18n();
   const { data } = usePos();
   const [openDialog, setOpenDialog] = useState(false);
@@ -69,6 +70,12 @@ export function ShiftBar() {
           <div className="font-semibold">{shift.cashier}</div>
           <div className="text-muted-foreground" suppressHydrationWarning>
             {dict.shift.since} {formatTime(locale, shift.openedAt, tz)}
+          </div>
+        </div>
+        <div className="border-s ps-3 text-xs leading-tight">
+          <div className="text-muted-foreground">{dict.shift.elapsed}</div>
+          <div dir="ltr" className="font-mono text-base font-bold tabular-nums" suppressHydrationWarning>
+            {formatCountdown(Math.max(0, now.getTime() - new Date(shift.openedAt).getTime()))}
           </div>
         </div>
         <div className="border-s ps-3 text-xs leading-tight">

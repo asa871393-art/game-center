@@ -3,12 +3,13 @@ import type { Metadata } from "next";
 import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
+import { ManagersOnly } from "@/components/pos/managers-only";
 import { Skeleton } from "@/components/ui/skeleton";
 import { localeMeta, localePath } from "@/i18n/config";
 import { format } from "@/i18n/format";
 import { getDictionary, getLocale } from "@/i18n/server";
 import { getSession } from "@/server/session";
-import { listManagedLounges } from "@/server/staff";
+import { isStaffRole, listManagedLounges } from "@/server/staff";
 
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDictionary();
@@ -34,6 +35,9 @@ async function LoungeList() {
   const [locale, session] = await Promise.all([getLocale(), getSession()]);
   if (!session?.user?.id) {
     redirect(`${localePath(locale, "/login")}?callbackUrl=${encodeURIComponent(localePath(locale, "/pos"))}`);
+  }
+  if (!isStaffRole(session.user.role)) {
+    return <ManagersOnly locale={locale} email={session.user.email ?? ""} path="/pos" />;
   }
   const [dict, lounges] = await Promise.all([getDictionary(locale), listManagedLounges(session.user.id, session.user.role)]);
   if (lounges.length === 1) redirect(localePath(locale, `/pos/${lounges[0].id}`));

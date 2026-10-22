@@ -19,7 +19,7 @@ export interface Receipt {
   id: string;
   reference: string;
   loungeId: string;
-  lounge: { name: string; addressLine: string; city: string; phone: string | null; timezone: string; currency: string };
+  lounge: { name: string; slug: string; addressLine: string; city: string; phone: string | null; timezone: string; currency: string };
   issuedAt: string;
   cashier: string | null;
   guest: string | null;
@@ -40,7 +40,7 @@ export interface Receipt {
   isFinal: boolean;
 }
 
-const loungeSelect = { name: true, addressLine: true, city: true, phone: true, timezone: true, currency: true } as const;
+const loungeSelect = { name: true, slug: true, addressLine: true, city: true, phone: true, timezone: true, currency: true } as const;
 
 function paymentsOf(rows: { method: PaymentMethod; amount: { toString(): string }; metadata: unknown; createdAt: Date }[]) {
   return rows.map((t) => {

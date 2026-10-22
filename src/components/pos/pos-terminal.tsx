@@ -80,7 +80,10 @@ function Terminal({ cashierName }: { cashierName: string }) {
     <div className="flex h-dvh flex-col">
       <header className="z-30 flex flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-2 backdrop-blur">
         <div className="min-w-0">
-          <div className="truncate text-lg font-bold">{data.lounge.name}</div>
+          <div className="truncate text-xs font-semibold text-primary">
+            {dict.common.appName} - {dict.pos.controlTitle}
+          </div>
+          <div className="truncate text-lg leading-tight font-bold">{data.lounge.name}</div>
           <div className="truncate text-xs text-muted-foreground">
             {dict.pos.cashier}: {cashierName}
           </div>
@@ -89,7 +92,7 @@ function Terminal({ cashierName }: { cashierName: string }) {
           <span className={cn("size-2 rounded-full", liveDot[live])} aria-hidden />
           {dict.manage.connection[live]}
         </div>
-        <ShiftBar />
+        <ShiftBar now={now} />
         <div className="ms-auto flex items-center gap-2">
           <div className="hidden text-end xl:block">
             <div dir="ltr" className="font-mono text-2xl leading-none font-bold tabular-nums" suppressHydrationWarning>

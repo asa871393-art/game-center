@@ -226,6 +226,8 @@ const ar = {
     managersOnly: "هذه الصفحة للمدراء والمالكين فقط",
     managersOnlyHint: "أنت مسجل الدخول باسم {email} وصلاحيتك لا تسمح بفتحها. سجّل الدخول بحساب مدير أو مالك للمتابعة.",
     switchAccount: "تسجيل الدخول بحساب آخر",
+    staffOnly: "نقطة البيع لطاقم الصالة فقط",
+    staffOnlyHint: "أنت مسجل الدخول باسم {email}، وهذا الحساب ليس من طاقم أي صالة. سجّل الدخول بحساب كاشير أو مدير للمتابعة.",
     generic: "حدث خطأ غير متوقع. حاول مرة أخرى.",
     validation: "يرجى التحقق من البيانات المدخلة.",
     unauthenticated: "يجب تسجيل الدخول أولاً.",
@@ -413,6 +415,8 @@ const ar = {
   },
   pos: {
     title: "نقطة البيع",
+    /** Shown after the app name in the terminal header. */
+    controlTitle: "نقطة البيع والتحكم",
     addDiscount: "إضافة خصم",
     noDiscount: "بدون خصم",
     clearCart: "تفريغ",
@@ -503,6 +507,7 @@ const ar = {
     extension: "تمديد",
     discount: "خصم",
     thanks: "شكراً لزيارتكم! نراكم قريباً",
+    qrLabel: "امسح الرمز للحجز مرة أخرى",
     paymentMethod: { CASH: "نقداً", CARD: "بطاقة", WALLET: "محفظة", ONLINE: "دفع إلكتروني", ZAINCASH: "زين كاش", FASTPAY: "فاست باي" },
   },
   shift: {
@@ -516,6 +521,7 @@ const ar = {
     closed: "تم إغلاق الوردية",
     since: "منذ",
     cashInDrawer: "النقد في الدرج",
+    elapsed: "مدة الوردية",
     requiredToPay: "افتح وردية أولاً لاستلام المدفوعات.",
     sessions: "جلسات محاسبة",
     counterSales: "مبيعات مباشرة",

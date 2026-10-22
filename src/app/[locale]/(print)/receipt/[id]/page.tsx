@@ -1,12 +1,14 @@
 import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
+import { ReceiptQr } from "@/components/pos/receipt-qr";
 import { ReceiptToolbar } from "@/components/pos/receipt-toolbar";
 import { localeMeta, localePath, type Locale } from "@/i18n/config";
 import type { Dictionary } from "@/i18n/dictionaries/ar";
 import { format, formatDuration, money } from "@/i18n/format";
 import { getDictionary, getLocale } from "@/i18n/server";
 import { getReceipt, type Receipt, type ReceiptLine } from "@/server/queries/receipt";
+import { env } from "@/lib/env";
 import { getSession } from "@/server/session";
 import { getLoungeAccess } from "@/server/staff";
 
@@ -73,6 +75,9 @@ function Line({ label, value, bold, sub }: { label: React.ReactNode; value: Reac
 
 /** 72mm printable width on 80mm paper; sized in mm so it prints 1:1. */
 function ReceiptPaper({ receipt: r, locale, dict }: { receipt: Receipt; locale: Locale; dict: Dictionary }) {
+  // The lounge's public page, tagged with the receipt number: customers scan it to book again.
+  const qrUrl = new URL(localePath(locale, `/lounges/${r.lounge.slug}`), env.NEXT_PUBLIC_APP_URL);
+  qrUrl.searchParams.set("ref", r.reference);
   const cur = r.lounge.currency;
   const tz = r.lounge.timezone;
   const m = (v: number) => money(locale, v, cur);
@@ -85,7 +90,8 @@ function ReceiptPaper({ receipt: r, locale, dict }: { receipt: Receipt; locale: 
       className="receipt-paper mx-auto mb-6 w-[80mm] bg-white px-[4mm] py-[4mm] text-[12px] leading-snug text-black shadow-lg"
     >
       <header className="text-center">
-        <div className="text-[16px] font-bold">{r.lounge.name}</div>
+        <div className="text-[20px] leading-tight font-extrabold">{dict.common.appName}</div>
+        <div className="text-[14px] font-bold">{r.lounge.name}</div>
         <div className="text-[10px]">
           {r.lounge.addressLine}
           {dict.manage.listSep}
@@ -171,6 +177,10 @@ function ReceiptPaper({ receipt: r, locale, dict }: { receipt: Receipt; locale: 
       <Divider />
       <footer className="text-center text-[11px]">
         <div>{dict.receipt.thanks}</div>
+        <div className="mt-2">
+          <ReceiptQr value={qrUrl.toString()} label={dict.receipt.qrLabel} />
+          <div className="mt-1 text-[10px]">{dict.receipt.qrLabel}</div>
+        </div>
         <div dir="ltr" className="mt-1 font-mono text-[10px] tracking-widest">
           *{r.reference}*
         </div>
