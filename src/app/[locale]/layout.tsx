@@ -19,7 +19,7 @@ export function generateStaticParams() {
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDictionary();
   return {
-    title: { default: dict.meta.title, template: `%s · ${dict.meta.title}` },
+    title: { default: dict.meta.title, template: `%s · ${dict.common.appName}` },
     description: dict.meta.description,
     alternates: { languages: Object.fromEntries(locales.map((l) => [l, `/${l}`])) },
   };

@@ -1,4 +1,4 @@
-# Nexus Lounge — Gaming Lounge Booking & Management
+# الاساس (Al-Asas) — Gaming Lounge Booking & Management
 
 Multi-tenant platform for gaming lounges (PC arenas, PlayStation, VR, VIP rooms):
 customer booking, lounge POS/floor plan, and super-admin tenant management.

@@ -2,11 +2,11 @@ import type { Dictionary } from "./ar";
 
 const en: Dictionary = {
   meta: {
-    title: "Nexus Lounge",
+    title: "الاساس | Gaming lounge booking & management",
     description: "Find and book PC, PlayStation, VR and VIP gaming rooms near you.",
   },
   common: {
-    appName: "Nexus Lounge",
+    appName: "الاساس",
     loading: "Loading…",
     back: "Back",
     next: "Next",
@@ -737,7 +737,7 @@ const en: Dictionary = {
     restored: "{name} restored (unavailable until you enable it)",
   },
   footer: {
-    rights: "© {year} Nexus Lounge. All rights reserved.",
+    rights: "© {year} الاساس. All rights reserved.",
     forLounges: "Own a gaming lounge? Partner with us.",
   },
 };
