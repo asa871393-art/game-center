@@ -10,7 +10,7 @@ Firebase Firestore (Admin SDK) · Zustand · Auth.js v5 · Vitest
 ## Getting started
 
 ```bash
-cp .env.example .env          # then set AUTH_SECRET (npx auth secret)
+cp .env.example .env          # then set AUTH_SECRET (npx auth secret, or openssl rand -base64 32)
 npm install
 ```
 
@@ -341,7 +341,7 @@ On the regular login page, staff who sign in with no particular destination also
 
 1. Set up the Firebase project as in [Firebase](#firebase), including `npm run firestore:deploy`. A query whose
    composite index is missing fails with a Firestore error containing a link that creates it.
-2. In Netlify → Site configuration → Environment variables set `AUTH_SECRET`, `NEXT_PUBLIC_APP_URL` (your site URL),
+2. In Netlify → Site configuration → Environment variables set `AUTH_SECRET` (`NEXTAUTH_SECRET` also works), `NEXT_PUBLIC_APP_URL` (your site URL),
    `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, plus the storage bucket and
    Google keys you use.
 3. For Google sign-in, add `https://<your-site>/api/auth/callback/google` to the OAuth client's redirect URIs.

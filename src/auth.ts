@@ -7,7 +7,7 @@ import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
 import { z } from "zod";
 import type { Role } from "@/lib/db/types";
-import { env, googleOAuth, isGoogleAuthEnabled } from "@/lib/env";
+import { authSecret, googleOAuth, isGoogleAuthEnabled } from "@/lib/env";
 import { firestoreAdapter } from "@/server/auth-adapter";
 import { db } from "@/server/db";
 
@@ -73,7 +73,9 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: firestoreAdapter(),
   // Credentials sign-in requires JWT sessions.
   session: { strategy: "jwt" },
-  secret: env.AUTH_SECRET,
+  // AUTH_SECRET, or NEXTAUTH_SECRET on deployments configured with the v4 name.
+  secret: authSecret,
+  // Take the host from the request (Netlify's deploy and branch URLs); AUTH_URL / NEXTAUTH_URL override it.
   trustHost: true,
   providers,
   pages: { signIn: "/ar/login", error: "/ar/login" },

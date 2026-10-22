@@ -9,7 +9,9 @@ const optionalString = z
 
 const envSchema = z.object({
   NODE_ENV: z.enum(["development", "test", "production"]).default("development"),
-  AUTH_SECRET: z.string().min(32, "AUTH_SECRET must be at least 32 characters"),
+  /** Signs session JWTs. NEXTAUTH_SECRET (the Auth.js v4 name) is accepted when AUTH_SECRET is unset. */
+  AUTH_SECRET: optionalString,
+  NEXTAUTH_SECRET: optionalString,
   /** Google OAuth is enabled only when both are set (GOOGLE_CLIENT_* or Auth.js's AUTH_GOOGLE_* names). */
   GOOGLE_CLIENT_ID: optionalString,
   GOOGLE_CLIENT_SECRET: optionalString,
@@ -33,7 +35,22 @@ const envSchema = z.object({
   PAYMENT_HOLD_MINUTES: z.coerce.number().int().min(5).max(60).default(15),
 });
 
-const parsed = envSchema.safeParse(process.env);
+const MIN_SECRET_LENGTH = 32;
+/** The value shipped in .env.example; public, so never a real secret. */
+const PLACEHOLDER_SECRET = "replace-with-a-32+-character-random-string";
+
+const parsed = envSchema
+  .superRefine((e, ctx) => {
+    const secret = e.AUTH_SECRET ?? e.NEXTAUTH_SECRET;
+    if (!secret || secret.length < MIN_SECRET_LENGTH || secret === PLACEHOLDER_SECRET) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["AUTH_SECRET"],
+        message: `Set AUTH_SECRET (or NEXTAUTH_SECRET) to a random string of at least ${MIN_SECRET_LENGTH} characters: npx auth secret, or openssl rand -base64 32`,
+      });
+    }
+  })
+  .safeParse(process.env);
 
 if (!parsed.success) {
   console.error("Invalid environment variables:", z.flattenError(parsed.error).fieldErrors);
@@ -41,6 +58,9 @@ if (!parsed.success) {
 }
 
 export const env = parsed.data;
+
+/** The session-signing secret, under whichever name the deployment set it. */
+export const authSecret: string = (env.AUTH_SECRET ?? env.NEXTAUTH_SECRET)!;
 
 export const googleOAuth = {
   clientId: env.GOOGLE_CLIENT_ID ?? env.AUTH_GOOGLE_ID,
