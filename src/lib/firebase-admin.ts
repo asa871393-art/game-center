@@ -1,6 +1,6 @@
 import "server-only";
 import { cert, deleteApp, getApp, getApps, initializeApp, type App } from "firebase-admin/app";
-import { getAuth, type Auth } from "firebase-admin/auth";
+import type { Auth } from "firebase-admin/auth";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import { getStorage, type Storage } from "firebase-admin/storage";
 import { env, firebaseAdminConfig } from "@/lib/env";
@@ -42,7 +42,12 @@ export function getAdminApp(): App {
   throw new FirebaseAdminNotConfiguredError();
 }
 
-export function getAdminAuth(): Auth {
+/**
+ * Loaded on demand: firebase-admin/auth pulls in jwks-rsa, which require()s the ESM-only jose and
+ * crashes on runtimes without require(esm) (Netlify's functions), taking every Firestore call with it.
+ */
+export async function getAdminAuth(): Promise<Auth> {
+  const { getAuth } = await import("firebase-admin/auth");
   return getAuth(getAdminApp());
 }
 

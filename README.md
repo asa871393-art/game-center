@@ -265,7 +265,7 @@ the app's own permission checks; browsers never read Firestore directly.
 | File | Side | What it gives you |
 | --- | --- | --- |
 | `src/server/db/` | server only | `db`: the data layer every query, service and action uses (see [Data layer](#data-layer)) |
-| `src/lib/firebase-admin.ts` | server only | `getAdminApp()`, `getAdminAuth()`, `getAdminDb()`, `getAdminStorage()` from the service account, or the emulator |
+| `src/lib/firebase-admin.ts` | server only | `getAdminApp()`, `getAdminAuth()` (async), `getAdminDb()`, `getAdminStorage()` from the service account, or the emulator |
 | `src/lib/firebase.ts` | client | `getFirebaseApp()`, `getFirebaseAuth()`, `getDb()`, `getFirebaseStorage()` (optional; unused by the app) |
 | `src/lib/firebase-storage.ts` | server only | `uploadProductImage(file, folderName): Promise<string>` |
 
