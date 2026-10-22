@@ -32,12 +32,15 @@ export const isFirebaseAdminConfigured = firebaseAdminConfig !== null || usesEmu
 
 export function getAdminApp(): App {
   if (getApps().some((a) => a.name === APP_NAME)) return getApp(APP_NAME);
+  // The emulator wins over service-account credentials, so every process in a run (seed, tests)
+  // uses the same emulator project; `firebase emulators:exec` sets GCLOUD_PROJECT.
+  if (usesEmulator()) {
+    const projectId = process.env.GCLOUD_PROJECT ?? env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? EMULATOR_PROJECT_ID;
+    return initializeApp({ projectId }, APP_NAME);
+  }
   if (firebaseAdminConfig) {
     const { projectId, clientEmail, privateKey, storageBucket } = firebaseAdminConfig;
     return initializeApp({ credential: cert({ projectId, clientEmail, privateKey }), projectId, storageBucket }, APP_NAME);
-  }
-  if (usesEmulator()) {
-    return initializeApp({ projectId: env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? EMULATOR_PROJECT_ID }, APP_NAME);
   }
   throw new FirebaseAdminNotConfiguredError();
 }
