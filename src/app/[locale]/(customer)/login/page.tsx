@@ -22,17 +22,23 @@ export default function LoginPage({ searchParams }: PageProps<"/[locale]/login">
   );
 }
 
+type AuthDict = Awaited<ReturnType<typeof getDictionary>>["auth"];
+
+/** Maps an Auth.js error code to its message; v4 names (OAuthCallback, ...) are accepted too. */
+function signInErrorMessage(code: string, auth: AuthDict): string {
+  if (code === "CredentialsSignin") return auth.invalidCredentials;
+  const normalized = code === "OAuthCallback" || code === "OAuthSignin" ? "OAuthCallbackError" : code;
+  return Object.hasOwn(auth.signInErrors, normalized)
+    ? auth.signInErrors[normalized as keyof AuthDict["signInErrors"]]
+    : auth.oauthError;
+}
+
 async function Login({ searchParams }: Pick<PageProps<"/[locale]/login">, "searchParams">) {
   const [sp, locale] = await Promise.all([searchParams, getLocale()]);
   const dict = await getDictionary(locale);
   const callbackUrl = typeof sp.callbackUrl === "string" ? sp.callbackUrl : localePath(locale);
-  // Auth.js redirects back here with ?error=... for OAuth failures.
-  const error =
-    typeof sp.error === "string"
-      ? sp.error === "CredentialsSignin"
-        ? dict.auth.invalidCredentials
-        : dict.auth.oauthError
-      : undefined;
+  // Auth.js redirects back here with ?error=<code> (it is both the sign-in and the error page).
+  const error = typeof sp.error === "string" ? signInErrorMessage(sp.error, dict.auth) : undefined;
   const registerHref = `${localePath(locale, "/register")}?callbackUrl=${encodeURIComponent(callbackUrl)}`;
 
   return (

@@ -209,6 +209,14 @@ const en: Dictionary = {
     invalidCredentials: "Incorrect email or password.",
     emailTaken: "That email is already registered.",
     oauthError: "Google sign-in failed. Please try again.",
+    signInErrors: {
+      OAuthCallbackError: "Google rejected or cancelled the sign-in. Try again; if it keeps happening, check that this site's callback URL is listed in the Google OAuth client.",
+      OAuthAccountNotLinked: "This email is linked to a different sign-in method. Sign in with your password first.",
+      AccessDenied: "Sign-in was refused: the account is deactivated or the Google email isn't verified.",
+      Verification: "The verification link has expired or was already used.",
+      MissingCSRF: "Your session expired. Refresh the page and try again.",
+      Configuration: "Sign-in isn't configured correctly on the server (for example the Google keys or AUTH_SECRET). Contact the site administrator.",
+    },
   },
   errors: {
     managersOnly: "This page is for managers and owners only",

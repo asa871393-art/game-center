@@ -212,6 +212,15 @@ const ar = {
     invalidCredentials: "البريد الإلكتروني أو كلمة المرور غير صحيحة.",
     emailTaken: "هذا البريد مسجّل مسبقاً.",
     oauthError: "تعذّر تسجيل الدخول عبر Google. حاول مرة أخرى.",
+    /** One message per Auth.js error code (?error=...) so the cause is visible. */
+    signInErrors: {
+      OAuthCallbackError: "رفضت Google طلب تسجيل الدخول أو تم إلغاؤه. حاول مرة أخرى، وإن تكرر الخطأ فتأكد من إضافة رابط الرجوع الخاص بالموقع في إعدادات Google OAuth.",
+      OAuthAccountNotLinked: "هذا البريد مرتبط بطريقة تسجيل دخول أخرى. سجّل الدخول بكلمة المرور أولاً.",
+      AccessDenied: "تم رفض تسجيل الدخول: الحساب معطّل أو أن بريد Google غير موثّق.",
+      Verification: "انتهت صلاحية رابط التحقق أو تم استخدامه مسبقاً.",
+      MissingCSRF: "انتهت صلاحية الجلسة. حدّث الصفحة ثم حاول مرة أخرى.",
+      Configuration: "تسجيل الدخول غير مهيأ بشكل صحيح على الخادم (مثل مفاتيح Google أو AUTH_SECRET). تواصل مع مسؤول الموقع.",
+    },
   },
   errors: {
     managersOnly: "هذه الصفحة للمدراء والمالكين فقط",
