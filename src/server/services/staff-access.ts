@@ -123,6 +123,8 @@ export interface LoungeStaffRow {
   googleLinked: boolean;
   /** Can sign in with a password too. */
   hasPassword: boolean;
+  /** Has a POS PIN for the lock screen keypad. */
+  hasPin: boolean;
   accountActive: boolean;
 }
 
@@ -131,7 +133,7 @@ export async function listLoungeStaff(loungeId: string): Promise<LoungeStaffRow[
   const members = await db.loungeMember.findMany({
     where: { loungeId, isActive: true },
     include: {
-      user: { select: { id: true, name: true, email: true, isActive: true, passwordHash: true, accounts: { select: { provider: true } } } },
+      user: { select: { id: true, name: true, email: true, isActive: true, passwordHash: true, pinHash: true, accounts: { select: { provider: true } } } },
     },
   });
   const rank: Record<LoungeMemberRole, number> = { OWNER: 0, MANAGER: 1, STAFF: 2 };
@@ -144,6 +146,7 @@ export async function listLoungeStaff(loungeId: string): Promise<LoungeStaffRow[
       role: m.role,
       googleLinked: m.user.accounts.some((a) => a.provider === "google"),
       hasPassword: m.user.passwordHash !== null,
+      hasPin: !!m.user.pinHash,
       accountActive: m.user.isActive,
     }))
     .sort((a, b) => rank[a.role] - rank[b.role] || (a.email ?? "").localeCompare(b.email ?? ""));

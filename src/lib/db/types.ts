@@ -192,6 +192,12 @@ export interface User {
   image: string | null;
   /** bcrypt hash for credentials login; null for OAuth-only users. */
   passwordHash: string | null;
+  /** bcrypt hash of the 4-6 digit POS PIN (quick cashier sign-in); null when none is set. */
+  pinHash: string | null;
+  /** Wrong PINs in a row; reset on success or when the PIN changes. */
+  pinFailedAttempts: number;
+  /** PIN sign-in is refused until this time after too many wrong PINs. */
+  pinLockedUntil: Date | null;
   role: Role;
   isActive: boolean;
   createdAt: Date;

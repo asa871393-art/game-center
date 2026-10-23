@@ -1,7 +1,9 @@
 "use server";
 
 import { z } from "zod";
+import { PIN_PATTERN } from "@/lib/pin";
 import { PosError } from "@/server/services/pos";
+import { setMemberPin } from "@/server/services/pos-pin";
 import { grantLoungeAccess, revokeLoungeAccess } from "@/server/services/staff-access";
 import { getLoungeAccess } from "@/server/staff";
 import { actionId as id, loungeScoped as base, runLoungeAction as run } from "./pipeline";
@@ -33,6 +35,16 @@ const revokeSchema = base.extend({ memberId: id });
 export async function revokeStaffAction(payload: z.input<typeof revokeSchema>) {
   return run(revokeSchema, payload, "MANAGER", async (ctx, i) => {
     await revokeLoungeAccess(ctx, { memberId: i.memberId, actorRole: await actorRole(ctx) });
+    return null;
+  });
+}
+
+const pinSchema = base.extend({ memberId: id, pin: z.string().regex(PIN_PATTERN).nullable() });
+
+/** Sets a member's POS PIN, or removes it with `pin: null`. */
+export async function setStaffPinAction(payload: z.input<typeof pinSchema>) {
+  return run(pinSchema, payload, "MANAGER", async (ctx, i) => {
+    await setMemberPin(ctx, { memberId: i.memberId, pin: i.pin, actorRole: await actorRole(ctx) });
     return null;
   });
 }

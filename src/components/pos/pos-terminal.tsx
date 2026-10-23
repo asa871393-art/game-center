@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardList, History, LayoutDashboard, Settings2, ShoppingCart, Users, UtensilsCrossed } from "lucide-react";
+import { ClipboardList, History, LayoutDashboard, Lock, Settings2, ShoppingCart, Users, UtensilsCrossed } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useState } from "react";
 import { toast } from "sonner";
@@ -16,6 +16,7 @@ import { useDebouncedRefresh, useLiveEvents, type LiveStatus } from "@/hooks/use
 import { useI18n } from "@/i18n/client";
 import { formatDate, money } from "@/i18n/format";
 import { cn } from "@/lib/utils";
+import { lockPosAction } from "@/server/actions/pos-lock";
 import type { PosBoardData } from "@/server/queries/manage";
 import { CounterPanel } from "./counter-panel";
 import { DeviceTile } from "./device-tile";
@@ -169,6 +170,16 @@ function Terminal({ cashierName }: { cashierName: string }) {
             <LayoutDashboard aria-hidden />
             <span className="sr-only">{dict.nav.dashboard}</span>
           </Link>
+          <form action={lockPosAction}>
+            <input type="hidden" name="locale" value={locale} />
+            <input type="hidden" name="loungeId" value={data.lounge.id} />
+            <input type="hidden" name="path" value={`/pos/${data.lounge.id}`} />
+            <Button type="submit" size="lg" variant="outline" className="h-12" title={dict.posLock.lock}>
+              <Lock aria-hidden />
+              <span className="hidden lg:inline">{dict.posLock.lock}</span>
+              <span className="sr-only lg:hidden">{dict.posLock.lock}</span>
+            </Button>
+          </form>
         </div>
       </header>
 

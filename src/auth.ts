@@ -8,15 +8,17 @@ import Google from "next-auth/providers/google";
 import { z } from "zod";
 import type { Role } from "@/lib/db/types";
 import { authSecret, googleOAuth, isGoogleAuthEnabled } from "@/lib/env";
+import { readPinTicket } from "@/lib/pos-terminal";
 import { firestoreAdapter } from "@/server/auth-adapter";
 import { db } from "@/server/db";
+import { isStaffRole } from "@/server/staff";
 
 declare module "next-auth" {
   interface Session {
     user: {
       id: string;
       role: Role;
-      /** How this session signed in: "credentials" or "google". */
+      /** How this session signed in: "credentials", "google" or "pos-pin". */
       provider?: string;
     } & DefaultSession["user"];
   }
@@ -52,6 +54,22 @@ const providers: Provider[] = [
       const hash = user?.passwordHash ?? DUMMY_HASH;
       const valid = await bcrypt.compare(parsed.data.password, hash);
       if (!user || !user.passwordHash || !valid || !user.isActive) return null;
+      return { id: user.id, name: user.name, email: user.email, image: user.image, role: user.role };
+    },
+  }),
+  /**
+   * POS PIN sign-in. /api/auth/pos-pin checks the terminal and the PIN (with its lockout), then
+   * signs in here with a short-lived ticket signed by the auth secret; nothing else gets one.
+   */
+  Credentials({
+    id: "pos-pin",
+    name: "POS PIN",
+    credentials: { ticket: {} },
+    async authorize(raw) {
+      const userId = readPinTicket(raw?.ticket, authSecret);
+      if (!userId) return null;
+      const user = await db.user.findUnique({ where: { id: userId } });
+      if (!user?.isActive || !isStaffRole(user.role)) return null;
       return { id: user.id, name: user.name, email: user.email, image: user.image, role: user.role };
     },
   }),
@@ -98,7 +116,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return session;
     },
     async signIn({ user, account, profile }) {
-      if (account?.provider === "credentials") return true;
+      if (account?.provider === "credentials" || account?.provider === "pos-pin") return true;
       // Only addresses Google has verified may create or link an account.
       if (account?.provider === "google" && profile?.email_verified !== true) return false;
       // Block OAuth sign-in for deactivated accounts.
