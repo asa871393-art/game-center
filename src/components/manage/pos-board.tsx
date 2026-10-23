@@ -1,6 +1,6 @@
 "use client";
 
-import { Activity, CalendarClock, CheckCircle2, Coffee, Settings2, UtensilsCrossed, Wallet } from "lucide-react";
+import { Activity, CalendarClock, CheckCircle2, Coffee, Settings2, Users, UtensilsCrossed, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { toast } from "sonner";
@@ -68,6 +68,11 @@ function Board() {
           {!data.businessDay.isOpen && <Badge variant="outline">{dict.manage.closedNow}</Badge>}
           <ConnectionBadge status={live} />
           <span suppressHydrationWarning>{t(dict.manage.updatedAt, { time: formatTime(locale, data.generatedAt, tz) })}</span>
+          {canManageDevices && (
+            <Link href={href(`/manage/${data.lounge.id}/staff`)} className={buttonVariants({ variant: "outline", size: "sm" })}>
+              <Users aria-hidden /> {dict.staffManage.title}
+            </Link>
+          )}
           {canManageDevices && (
             <Link href={href(`/pos/${data.lounge.id}/devices`)} className={buttonVariants({ variant: "outline", size: "sm" })}>
               <Settings2 aria-hidden /> {dict.devices.title}
