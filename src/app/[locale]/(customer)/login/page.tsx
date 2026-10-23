@@ -1,12 +1,16 @@
 import type { Metadata } from "next";
 import { Suspense } from "react";
 import { AuthCard } from "@/components/auth/auth-card";
-import { SignInForm } from "@/components/auth/auth-forms";
+import { GoogleSignInButton, GoogleSignInUnavailable, SignInForm } from "@/components/auth/auth-forms";
+import { SignInTabs } from "@/components/auth/sign-in-tabs";
 import { signInErrorMessage } from "@/components/auth/sign-in-errors";
+import { PinSignIn } from "@/components/pos/pin-sign-in";
 import { Skeleton } from "@/components/ui/skeleton";
 import { localePath } from "@/i18n/config";
 import { getDictionary, getLocale } from "@/i18n/server";
 import { isGoogleAuthEnabled } from "@/lib/env";
+import { posCallback } from "@/lib/pos-login";
+import { getTerminalLounge } from "@/server/services/pos-pin";
 
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDictionary();
@@ -30,6 +34,9 @@ async function Login({ searchParams }: Pick<PageProps<"/[locale]/login">, "searc
   const callbackUrl = typeof sp.callbackUrl === "string" ? sp.callbackUrl : localePath(locale, "/auth/continue");
   // Auth.js redirects back here with ?error=<code> (it is both the sign-in and the error page).
   const error = typeof sp.error === "string" ? signInErrorMessage(sp.error, dict.auth) : undefined;
+  const terminal = await getTerminalLounge();
+  // PIN sign-in is staff-only and lands on the POS (the API keeps it to the terminal's lounge).
+  const pinCallback = posCallback(locale, sp.callbackUrl);
   const registerHref = `${localePath(locale, "/register")}?callbackUrl=${encodeURIComponent(callbackUrl)}`;
 
   return (
@@ -40,8 +47,14 @@ async function Login({ searchParams }: Pick<PageProps<"/[locale]/login">, "searc
       callbackUrl={callbackUrl}
       orLabel={dict.auth.or}
       footer={{ text: dict.auth.noAccount, linkLabel: dict.nav.signUp, href: registerHref }}
+      showGoogle={false}
     >
-      <SignInForm callbackUrl={callbackUrl} initialError={error} />
+      <SignInTabs
+        defaultTab={terminal?.staff.length && !error ? "pin" : "password"}
+        pin={<PinSignIn terminal={terminal} callbackUrl={pinCallback} dict={dict} />}
+        password={<SignInForm callbackUrl={callbackUrl} initialError={error} />}
+        google={isGoogleAuthEnabled ? <GoogleSignInButton callbackUrl={callbackUrl} /> : <GoogleSignInUnavailable />}
+      />
     </AuthCard>
   );
 }

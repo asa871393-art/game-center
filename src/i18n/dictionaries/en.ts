@@ -791,6 +791,13 @@ const en: Dictionary = {
     otherMethod: "Sign in with Gmail or a password",
     error: "Couldn't sign in. Try again.",
     shiftKept: "The open shift stays open when staff switch.",
+    tabPin: "Quick PIN sign-in",
+    tabPassword: "Email & password",
+    tabGoogle: "Gmail",
+    methods: "Sign-in method",
+    notTerminalTitle: "This device isn't set up as a cashier terminal",
+    notTerminal: "PIN sign-in only works on registered cashier devices. To set this one up: sign in once with Gmail or a password, open the POS, then press \"Lock screen / Switch staff\". After that, staff can sign in here with their PIN.",
+    terminalOf: "Cashier terminal: {name}",
   },
   staffAdmin: {
     title: "Lounge staff",

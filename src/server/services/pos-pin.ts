@@ -1,4 +1,6 @@
 import "server-only";
+import { cookies } from "next/headers";
+import { authSecret } from "@/lib/env";
 import type { LoungeMemberRole } from "@/lib/db/types";
 import {
   afterPinFailure,
@@ -11,6 +13,7 @@ import {
   verifyPin,
   type PinAttemptState,
 } from "@/lib/pin";
+import { POS_TERMINAL_COOKIE, readTerminal } from "@/lib/pos-terminal";
 import { db } from "@/server/db";
 import { isStaffRole } from "@/server/staff";
 import { PosError, type PosContext } from "./pos";
@@ -37,6 +40,23 @@ export async function listPinStaff(loungeId: string): Promise<PinStaffMember[]> 
     .filter((m) => m.user.isActive && isStaffRole(m.user.role) && m.user.pinHash)
     .map((m) => ({ userId: m.user.id, name: m.user.name ?? m.user.email?.split("@")[0] ?? "?", image: m.user.image, role: m.role }))
     .sort((a, b) => a.name.localeCompare(b.name));
+}
+
+export interface TerminalLounge {
+  id: string;
+  name: string;
+  staff: PinStaffMember[];
+}
+
+/** The lounge this browser is a locked cashier terminal for, with who can sign in by PIN there. */
+export async function getTerminalLounge(): Promise<TerminalLounge | null> {
+  const loungeId = readTerminal((await cookies()).get(POS_TERMINAL_COOKIE)?.value, authSecret);
+  if (!loungeId) return null;
+  const [lounge, staff] = await Promise.all([
+    db.lounge.findUnique({ where: { id: loungeId }, select: { id: true, name: true } }),
+    listPinStaff(loungeId),
+  ]);
+  return lounge ? { ...lounge, staff } : null;
 }
 
 export type PinCheck =

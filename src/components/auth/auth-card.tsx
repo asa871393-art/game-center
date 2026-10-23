@@ -10,6 +10,7 @@ export function AuthCard({
   callbackUrl,
   orLabel,
   footer,
+  showGoogle = true,
   children,
 }: {
   title: string;
@@ -18,6 +19,8 @@ export function AuthCard({
   callbackUrl: string;
   orLabel: string;
   footer: { text: string; linkLabel: string; href: string };
+  /** False when the page offers Gmail itself (the sign-in tabs). */
+  showGoogle?: boolean;
   children: ReactNode;
 }) {
   return (
@@ -26,7 +29,7 @@ export function AuthCard({
         <h1 className="text-2xl font-bold">{title}</h1>
         <p className="text-sm text-muted-foreground">{subtitle}</p>
       </div>
-      {(googleEnabled || process.env.NODE_ENV === "development") && (
+      {showGoogle && (googleEnabled || process.env.NODE_ENV === "development") && (
         <>
           {googleEnabled ? <GoogleSignInButton callbackUrl={callbackUrl} /> : <GoogleSignInUnavailable />}
           <div className="flex items-center gap-3 text-xs text-muted-foreground">
