@@ -18,9 +18,12 @@ const APP_NAME = "gaming-lounge-admin";
 const EMULATOR_PROJECT_ID = "demo-gaming-lounge";
 
 export class FirebaseAdminNotConfiguredError extends Error {
-  constructor() {
+  constructor(options?: { cause?: unknown }) {
     super(
-      "Firebase Admin is not configured. Set NEXT_PUBLIC_FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY in .env (or FIRESTORE_EMULATOR_HOST for the emulator).",
+      options?.cause
+        ? "Firebase Admin credentials are invalid. Check FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY (the full PEM, with literal \\n line breaks) in the environment."
+        : "Firebase Admin is not configured. Set NEXT_PUBLIC_FIREBASE_PROJECT_ID, FIREBASE_CLIENT_EMAIL and FIREBASE_PRIVATE_KEY in .env (or FIRESTORE_EMULATOR_HOST for the emulator).",
+      options,
     );
     this.name = "FirebaseAdminNotConfiguredError";
   }
@@ -40,7 +43,14 @@ export function getAdminApp(): App {
   }
   if (firebaseAdminConfig) {
     const { projectId, clientEmail, privateKey, storageBucket } = firebaseAdminConfig;
-    return initializeApp({ credential: cert({ projectId, clientEmail, privateKey }), projectId, storageBucket }, APP_NAME);
+    // cert() rejects a malformed key synchronously; surface it as a configuration error callers can handle.
+    let credential;
+    try {
+      credential = cert({ projectId, clientEmail, privateKey });
+    } catch (cause) {
+      throw new FirebaseAdminNotConfiguredError({ cause });
+    }
+    return initializeApp({ credential, projectId, storageBucket }, APP_NAME);
   }
   throw new FirebaseAdminNotConfiguredError();
 }

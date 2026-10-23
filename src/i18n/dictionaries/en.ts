@@ -242,6 +242,11 @@ const en: Dictionary = {
     title: "Dashboard",
     chooseLounge: "Choose a lounge",
     noLounges: "No lounges are linked to your account. Ask the lounge owner to add you.",
+    loungeNotFound: "This lounge doesn't exist or has been deleted",
+    loungeNotFoundHint: "Check the link, or pick one of the lounges linked to your account.",
+    loadFailed: "Couldn't load the lounge",
+    loadFailedHint: "We couldn't reach the database. Please try again in a moment.",
+    backToLounges: "Back to lounges",
     role: { OWNER: "Owner", MANAGER: "Manager", STAFF: "Staff" },
     businessDay: "Business day: {date}",
     connection: {
