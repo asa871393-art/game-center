@@ -35,7 +35,7 @@ async function Login({ searchParams }: Pick<PageProps<"/[locale]/login">, "searc
   // Auth.js redirects back here with ?error=<code> (it is both the sign-in and the error page).
   const error = typeof sp.error === "string" ? signInErrorMessage(sp.error, dict.auth) : undefined;
   const terminal = await getTerminalLounge();
-  // PIN sign-in is staff-only and lands on the POS (the API keeps it to the terminal's lounge).
+  // PIN sign-in is staff-only: offered here only on a cashier terminal, landing on its POS.
   const pinCallback = posCallback(locale, sp.callbackUrl);
   const registerHref = `${localePath(locale, "/register")}?callbackUrl=${encodeURIComponent(callbackUrl)}`;
 
@@ -51,7 +51,7 @@ async function Login({ searchParams }: Pick<PageProps<"/[locale]/login">, "searc
     >
       <SignInTabs
         defaultTab={terminal?.staff.length && !error ? "pin" : "password"}
-        pin={<PinSignIn terminal={terminal} callbackUrl={pinCallback} dict={dict} />}
+        pin={terminal ? <PinSignIn terminal={terminal} callbackUrl={pinCallback} dict={dict} /> : undefined}
         password={<SignInForm callbackUrl={callbackUrl} initialError={error} />}
         google={isGoogleAuthEnabled ? <GoogleSignInButton callbackUrl={callbackUrl} /> : <GoogleSignInUnavailable />}
       />
