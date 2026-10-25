@@ -1,24 +1,19 @@
 import "server-only";
 import "next-auth/jwt";
-import bcrypt from "bcryptjs";
 import NextAuth, { type DefaultSession } from "next-auth";
 import type { Provider } from "next-auth/providers";
-import Credentials from "next-auth/providers/credentials";
 import Google from "next-auth/providers/google";
-import { z } from "zod";
 import type { Role } from "@/lib/db/types";
 import { authSecret, googleOAuth, isGoogleAuthEnabled } from "@/lib/env";
-import { readPinTicket } from "@/lib/pos-terminal";
 import { firestoreAdapter } from "@/server/auth-adapter";
 import { db } from "@/server/db";
-import { isStaffRole } from "@/server/staff";
 
 declare module "next-auth" {
   interface Session {
     user: {
       id: string;
       role: Role;
-      /** How this session signed in: "credentials", "google" or "pos-pin". */
+      /** How this session signed in: always "google". */
       provider?: string;
     } & DefaultSession["user"];
   }
@@ -35,61 +30,25 @@ declare module "next-auth/jwt" {
   }
 }
 
-/** bcrypt hash of a throwaway string, compared when the email is unknown so response time doesn't reveal it. */
-const DUMMY_HASH = "$2b$12$zdQSIdJfkheXRPdC7MXAGuDXdwFdCIBV2z2PugIMZviAtslfdpvKW";
-
-export const credentialsSchema = z.object({
-  email: z.email().trim().toLowerCase(),
-  password: z.string().min(8).max(128),
-});
-
-const providers: Provider[] = [
-  Credentials({
-    credentials: { email: {}, password: {} },
-    async authorize(raw) {
-      const parsed = credentialsSchema.safeParse(raw);
-      if (!parsed.success) return null;
-      const user = await db.user.findUnique({ where: { email: parsed.data.email } });
-      // Compare against a dummy hash when the user is missing to keep timing uniform.
-      const hash = user?.passwordHash ?? DUMMY_HASH;
-      const valid = await bcrypt.compare(parsed.data.password, hash);
-      if (!user || !user.passwordHash || !valid || !user.isActive) return null;
-      return { id: user.id, name: user.name, email: user.email, image: user.image, role: user.role };
-    },
-  }),
-  /**
-   * POS PIN sign-in. /api/auth/pos-pin checks the terminal and the PIN (with its lockout), then
-   * signs in here with a short-lived ticket signed by the auth secret; nothing else gets one.
-   */
-  Credentials({
-    id: "pos-pin",
-    name: "POS PIN",
-    credentials: { ticket: {} },
-    async authorize(raw) {
-      const userId = readPinTicket(raw?.ticket, authSecret);
-      if (!userId) return null;
-      const user = await db.user.findUnique({ where: { id: userId } });
-      if (!user?.isActive || !isStaffRole(user.role)) return null;
-      return { id: user.id, name: user.name, email: user.email, image: user.image, role: user.role };
-    },
-  }),
-];
-
-if (isGoogleAuthEnabled) {
-  providers.push(
-    Google({
-      clientId: googleOAuth.clientId,
-      clientSecret: googleOAuth.clientSecret,
-      // Link to an existing account with the same email. Safe only because signIn below
-      // requires a Google-verified email and linkAccount drops unverified passwords.
-      allowDangerousEmailAccountLinking: true,
-    }),
-  );
-}
+/**
+ * Google is the only way in. Staff are pre-registered by email (dashboard or `npm run staff:grant`);
+ * their first Google sign-in links to that account, so it keeps its role.
+ */
+const providers: Provider[] = isGoogleAuthEnabled
+  ? [
+      Google({
+        clientId: googleOAuth.clientId,
+        clientSecret: googleOAuth.clientSecret,
+        // Link to an existing account with the same email. Safe only because signIn below
+        // requires a Google-verified email and linkAccount drops unverified passwords.
+        allowDangerousEmailAccountLinking: true,
+      }),
+    ]
+  : [];
 
 export const { handlers, auth, signIn, signOut } = NextAuth({
   adapter: firestoreAdapter(),
-  // Credentials sign-in requires JWT sessions.
+  // JWT sessions: the adapter stores users and accounts only.
   session: { strategy: "jwt" },
   // AUTH_SECRET, or NEXTAUTH_SECRET on deployments configured with the v4 name.
   secret: authSecret,
@@ -128,12 +87,11 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
       return session;
     },
     async signIn({ user, account, profile }) {
-      if (account?.provider === "credentials" || account?.provider === "pos-pin") return true;
-      // Only addresses Google has verified may create or link an account.
-      if (account?.provider === "google" && profile?.email_verified !== true) return false;
+      // Only Google, and only addresses Google has verified, may create or link an account.
+      if (account?.provider !== "google" || profile?.email_verified !== true) return false;
       // Block OAuth sign-in for deactivated accounts.
       if (!user.email) return false;
-      const existing = await db.user.findUnique({ where: { email: user.email }, select: { isActive: true } });
+      const existing = await db.user.findUnique({ where: { email: user.email.toLowerCase() }, select: { isActive: true } });
       return existing?.isActive ?? true;
     },
   },

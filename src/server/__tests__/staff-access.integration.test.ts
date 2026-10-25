@@ -1,7 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { firestoreAdapter } from "@/server/auth-adapter";
 import { db } from "@/server/db";
-import { checkStaffPin } from "@/server/services/pos-pin";
 import { addStaffMember, grantLoungeAccess, listLoungeStaff, revokeLoungeAccess, updateStaffMember } from "@/server/services/staff-access";
 import { getLoungeAccess, getManagedLounge, getPlatformRole } from "@/server/staff";
 
@@ -118,13 +117,12 @@ describe("removing access", () => {
 describe("adding and editing staff from the dashboard", () => {
   const asOwner = () => ({ loungeId, actorId: ownerId });
 
-  it("creates the account with name, phone and a first PIN that signs in at the lounge", async () => {
+  it("creates the account with name, phone and a first PIN", async () => {
     const email = mail("added");
     const r = await addStaffMember(asOwner(), { email, name: "Sara Ali", phone: "+964 750 123 4567", role: "STAFF", pin: "4821", actorRole: "OWNER" });
     expect(r).toMatchObject({ created: true, role: "STAFF" });
     expect(await db.user.findUniqueOrThrow({ where: { email } })).toMatchObject({ name: "Sara Ali", phone: "+964 750 123 4567", role: "STAFF" });
     expect(await getLoungeAccess(r.userId, loungeId)).toEqual({ loungeId, role: "STAFF" });
-    expect(await checkStaffPin({ loungeId, userId: r.userId, pin: "4821" })).toEqual({ ok: true, userId: r.userId });
     expect((await listLoungeStaff(loungeId)).find((m) => m.userId === r.userId)).toMatchObject({ hasPin: true, onShift: false, phone: "+964 750 123 4567" });
   });
 

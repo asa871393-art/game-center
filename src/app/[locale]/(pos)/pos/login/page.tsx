@@ -1,17 +1,15 @@
-import { Lock, MonitorSmartphone } from "lucide-react";
+import { MonitorSmartphone, TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { GoogleSignInButton, GoogleSignInUnavailable, SignInForm } from "@/components/auth/auth-forms";
-import { SignInTabs } from "@/components/auth/sign-in-tabs";
+import { GoogleSignInButton, GoogleSignInUnavailable } from "@/components/auth/auth-forms";
 import { signInErrorMessage } from "@/components/auth/sign-in-errors";
 import { ManagersOnly } from "@/components/pos/managers-only";
-import { PinSignIn } from "@/components/pos/pin-sign-in";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getDictionary, getLocale } from "@/i18n/server";
 import { isGoogleAuthEnabled } from "@/lib/env";
 import { posCallback } from "@/lib/pos-login";
-import { getTerminalLounge } from "@/server/services/pos-pin";
 import { getSession } from "@/server/session";
 import { getPlatformRole, isStaffRole } from "@/server/staff";
 
@@ -21,10 +19,8 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /**
- * Cashier sign-in for the POS touchscreen: Gmail first (the account a manager granted access
- * to), email and password as a fallback. Staff who are already signed in go straight on.
- * Quick PIN sign-in is the first tab; it works on a registered cashier terminal (locked with
- * "Lock screen / Switch staff"), which opens on the keypad.
+ * The only sign-in: a Google button for the account a manager granted access to. Staff who are
+ * already signed in go straight on to the page they asked for (the POS by default).
  */
 export default function PosLoginPage({ searchParams }: PageProps<"/[locale]/pos/login">) {
   return (
@@ -56,36 +52,29 @@ async function CashierLogin({ searchParams }: Pick<PageProps<"/[locale]/pos/logi
 
   const error = typeof sp.error === "string" ? signInErrorMessage(sp.error, dict.auth) : undefined;
   const p = dict.posLogin;
-  const terminal = await getTerminalLounge();
-  // A terminal opens on the PIN keypad, elsewhere Gmail; a sign-in error shows on the password form.
-  const defaultTab = error || (!terminal?.staff.length && !isGoogleAuthEnabled) ? "password" : terminal?.staff.length ? "pin" : "google";
   return (
     <div className="w-full max-w-md space-y-6 rounded-3xl border bg-card p-6 shadow-lg sm:p-8">
       <div className="space-y-2 text-center">
         <div className="text-sm font-semibold text-primary">
           {dict.common.appName} - {dict.pos.controlTitle}
         </div>
-        {terminal ? (
-          <Lock className="mx-auto size-10 text-primary" aria-hidden />
-        ) : (
-          <MonitorSmartphone className="mx-auto size-10 text-primary" aria-hidden />
-        )}
-        <h1 className="text-2xl font-bold">{terminal ? dict.posLock.title : p.title}</h1>
-        {!terminal && <p className="text-sm text-muted-foreground">{p.subtitle}</p>}
+        <MonitorSmartphone className="mx-auto size-10 text-primary" aria-hidden />
+        <h1 className="text-2xl font-bold">{p.title}</h1>
+        <p className="text-sm text-muted-foreground">{p.subtitle}</p>
       </div>
 
-      <SignInTabs
-        defaultTab={defaultTab}
-        pin={<PinSignIn terminal={terminal} callbackUrl={callbackUrl} dict={dict} />}
-        password={<SignInForm callbackUrl={callbackUrl} initialError={error} />}
-        google={
-          isGoogleAuthEnabled ? (
-            <GoogleSignInButton callbackUrl={callbackUrl} label={p.google} size="xl" />
-          ) : (
-            <GoogleSignInUnavailable label={p.google} note={p.notConfigured} size="xl" />
-          )
-        }
-      />
+      {error && (
+        <Alert variant="destructive">
+          <TriangleAlert aria-hidden />
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      )}
+
+      {isGoogleAuthEnabled ? (
+        <GoogleSignInButton callbackUrl={callbackUrl} label={p.google} size="xl" />
+      ) : (
+        <GoogleSignInUnavailable label={p.google} note={p.notConfigured} size="xl" />
+      )}
     </div>
   );
 }
