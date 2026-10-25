@@ -35,20 +35,6 @@ export const MODELS: Record<ModelName, ModelMeta> = {
         "type": "String",
         "optional": true
       },
-      "pinHash": {
-        "type": "String",
-        "optional": true
-      },
-      "pinFailedAttempts": {
-        "type": "Int",
-        "default": {
-          "value": 0
-        }
-      },
-      "pinLockedUntil": {
-        "type": "DateTime",
-        "optional": true
-      },
       "role": {
         "type": "Enum",
         "default": {

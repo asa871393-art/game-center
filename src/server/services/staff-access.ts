@@ -1,6 +1,6 @@
 import "server-only";
 import type { LoungeMemberRole, Role } from "@/lib/db/types";
-import { canManagePin, hashPin, isWeakPin } from "@/lib/pin";
+import { canManageMember } from "@/lib/staff-permissions";
 import { db, type TxClient } from "@/server/db";
 import { isStaffRole } from "@/server/staff";
 import { getOpenShift, PosError, type PosContext } from "./pos";
@@ -96,23 +96,16 @@ export async function grantLoungeAccess(ctx: PosContext | { loungeId: string; ac
 }
 
 /**
- * "Add new staff" on the dashboard: grants access like grantLoungeAccess, with the person's name,
- * phone and an optional first PIN. Only owners add managers; a PIN is set only where the actor
- * may manage that member's PIN (so a manager can't set an owner's by re-adding them).
+ * "Add new staff" on the dashboard: grants access like grantLoungeAccess, with the person's name
+ * and phone. Only owners add managers.
  */
 export async function addStaffMember(
   ctx: PosContext,
-  input: GrantInput & { pin: string | null; actorRole: LoungeMemberRole },
+  input: GrantInput & { actorRole: LoungeMemberRole },
 ): Promise<GrantResult> {
   if (input.role === "MANAGER" && input.actorRole !== "OWNER") throw new PosError("FORBIDDEN");
-  if (input.pin !== null && isWeakPin(input.pin)) throw new PosError("WEAK_PIN");
-  const pinHash = input.pin === null ? null : await hashPin(input.pin);
   return db.$transaction(async (tx) => {
     const result = await grantIn(tx, ctx.loungeId, input);
-    if (pinHash) {
-      if (!canManagePin(input.actorRole, result.role, result.userId === ctx.actorId)) throw new PosError("FORBIDDEN");
-      await tx.user.update({ where: { id: result.userId }, data: { pinHash, pinFailedAttempts: 0, pinLockedUntil: null } });
-    }
     await tx.auditLog.create({
       data: {
         actorId: ctx.actorId,
@@ -120,7 +113,7 @@ export async function addStaffMember(
         action: "staff.add",
         entityType: "LoungeMember",
         entityId: result.memberId,
-        data: { email: input.email.trim().toLowerCase(), role: input.role, created: result.created, promoted: result.promoted, pinSet: !!pinHash },
+        data: { email: input.email.trim().toLowerCase(), role: input.role, created: result.created, promoted: result.promoted },
       },
     });
     return result;
@@ -142,7 +135,7 @@ export async function updateStaffMember(
     });
     if (!member || member.loungeId !== ctx.loungeId || !member.isActive) throw new PosError("NOT_FOUND");
     const isSelf = member.userId === ctx.actorId;
-    if (!canManagePin(input.actorRole, member.role, isSelf)) throw new PosError("FORBIDDEN");
+    if (!canManageMember(input.actorRole, member.role, isSelf)) throw new PosError("FORBIDDEN");
     const roleChanged = member.role !== "OWNER" && member.role !== input.role;
     if (roleChanged && (isSelf || input.actorRole !== "OWNER")) throw new PosError("FORBIDDEN");
 
@@ -196,10 +189,6 @@ export interface LoungeStaffRow {
   onShift: boolean;
   /** Has signed in with Google at least once (a linked Google account). */
   googleLinked: boolean;
-  /** Can sign in with a password too. */
-  hasPassword: boolean;
-  /** Has a POS PIN for the lock screen keypad. */
-  hasPin: boolean;
   accountActive: boolean;
 }
 
@@ -210,7 +199,7 @@ export async function listLoungeStaff(loungeId: string): Promise<LoungeStaffRow[
       where: { loungeId, isActive: true },
       include: {
         user: {
-          select: { id: true, name: true, email: true, phone: true, isActive: true, passwordHash: true, pinHash: true, accounts: { select: { provider: true } } },
+          select: { id: true, name: true, email: true, phone: true, isActive: true, accounts: { select: { provider: true } } },
         },
       },
     }),
@@ -227,8 +216,6 @@ export async function listLoungeStaff(loungeId: string): Promise<LoungeStaffRow[
       role: m.role,
       onShift: shift?.cashierId === m.userId,
       googleLinked: m.user.accounts.some((a) => a.provider === "google"),
-      hasPassword: m.user.passwordHash !== null,
-      hasPin: !!m.user.pinHash,
       accountActive: m.user.isActive,
     }))
     .sort((a, b) => rank[a.role] - rank[b.role] || (a.email ?? "").localeCompare(b.email ?? ""));

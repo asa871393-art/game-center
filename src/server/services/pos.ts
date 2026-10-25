@@ -51,8 +51,7 @@ export type PosErrorCode =
   | "PAID_BOOKING"
   | "FORBIDDEN"
   | "ACCOUNT_DISABLED"
-  | "CANNOT_REMOVE_SELF"
-  | "WEAK_PIN";
+  | "CANNOT_REMOVE_SELF";
 
 export class PosError extends Error {
   constructor(public readonly code: PosErrorCode) {

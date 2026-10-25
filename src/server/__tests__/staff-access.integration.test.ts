@@ -48,7 +48,7 @@ describe("granting cashier access to a Gmail address", () => {
     expect(found).toMatchObject({ id: user.id, role: "STAFF" });
     await adapter.linkAccount!({ userId: user.id, type: "oidc", provider: "google", providerAccountId: `${RUN}-g1` });
     expect(await adapter.getUserByAccount!({ provider: "google", providerAccountId: `${RUN}-g1` })).toMatchObject({ id: user.id, role: "STAFF" });
-    expect((await listLoungeStaff(loungeId)).find((m) => m.userId === user.id)).toMatchObject({ googleLinked: true, hasPassword: false, role: "STAFF" });
+    expect((await listLoungeStaff(loungeId)).find((m) => m.userId === user.id)).toMatchObject({ googleLinked: true, role: "STAFF" });
   });
 
   it("is idempotent and re-activates a removed member", async () => {
@@ -117,34 +117,31 @@ describe("removing access", () => {
 describe("adding and editing staff from the dashboard", () => {
   const asOwner = () => ({ loungeId, actorId: ownerId });
 
-  it("creates the account with name, phone and a first PIN", async () => {
+  it("creates the account with name and phone", async () => {
     const email = mail("added");
-    const r = await addStaffMember(asOwner(), { email, name: "Sara Ali", phone: "+964 750 123 4567", role: "STAFF", pin: "4821", actorRole: "OWNER" });
+    const r = await addStaffMember(asOwner(), { email, name: "Sara Ali", phone: "+964 750 123 4567", role: "STAFF", actorRole: "OWNER" });
     expect(r).toMatchObject({ created: true, role: "STAFF" });
     expect(await db.user.findUniqueOrThrow({ where: { email } })).toMatchObject({ name: "Sara Ali", phone: "+964 750 123 4567", role: "STAFF" });
     expect(await getLoungeAccess(r.userId, loungeId)).toEqual({ loungeId, role: "STAFF" });
-    expect((await listLoungeStaff(loungeId)).find((m) => m.userId === r.userId)).toMatchObject({ hasPin: true, onShift: false, phone: "+964 750 123 4567" });
+    expect((await listLoungeStaff(loungeId)).find((m) => m.userId === r.userId)).toMatchObject({ onShift: false, phone: "+964 750 123 4567" });
   });
 
-  it("keeps an existing account's name and refuses weak PINs and managers added by managers", async () => {
+  it("keeps an existing account's name and refuses managers added by managers", async () => {
     const email = mail("named");
     await db.user.create({ data: { email, name: "Own Name", role: "CUSTOMER", emailVerified: new Date() } });
-    const r = await addStaffMember(asOwner(), { email, name: "Other", phone: null, role: "STAFF", pin: null, actorRole: "OWNER" });
-    expect(await db.user.findUniqueOrThrow({ where: { id: r.userId } })).toMatchObject({ name: "Own Name", role: "STAFF", pinHash: null });
+    const r = await addStaffMember(asOwner(), { email, name: "Other", phone: null, role: "STAFF", actorRole: "OWNER" });
+    expect(await db.user.findUniqueOrThrow({ where: { id: r.userId } })).toMatchObject({ name: "Own Name", role: "STAFF" });
 
-    await expectCode(addStaffMember(asOwner(), { email: mail("weak"), name: "W", phone: null, role: "STAFF", pin: "1234", actorRole: "OWNER" }), "WEAK_PIN");
     const asManager = { loungeId, actorId: r.userId };
-    await expectCode(addStaffMember(asManager, { email: mail("mgr3"), name: "M", phone: null, role: "MANAGER", pin: null, actorRole: "MANAGER" }), "FORBIDDEN");
-    // Re-adding the owner's address can't set the owner's PIN.
-    await expectCode(
-      addStaffMember(asManager, { email: "owner@gamelounge.dev", name: "x", phone: null, role: "STAFF", pin: "4821", actorRole: "MANAGER" }),
-      "FORBIDDEN",
-    );
+    await expectCode(addStaffMember(asManager, { email: mail("mgr3"), name: "M", phone: null, role: "MANAGER", actorRole: "MANAGER" }), "FORBIDDEN");
+    // Re-adding the owner's address doesn't demote them.
+    await addStaffMember(asManager, { email: "owner@gamelounge.dev", name: "x", phone: null, role: "STAFF", actorRole: "MANAGER" });
+    expect(await getLoungeAccess(ownerId, loungeId)).toEqual({ loungeId, role: "OWNER" });
   });
 
   it("lets owners change roles and managers edit only cashiers' details", async () => {
-    const cashier = await addStaffMember(asOwner(), { email: mail("edit-c"), name: "C", phone: null, role: "STAFF", pin: null, actorRole: "OWNER" });
-    const manager = await addStaffMember(asOwner(), { email: mail("edit-m"), name: "M", phone: null, role: "MANAGER", pin: null, actorRole: "OWNER" });
+    const cashier = await addStaffMember(asOwner(), { email: mail("edit-c"), name: "C", phone: null, role: "STAFF", actorRole: "OWNER" });
+    const manager = await addStaffMember(asOwner(), { email: mail("edit-m"), name: "M", phone: null, role: "MANAGER", actorRole: "OWNER" });
     const asManager = { loungeId, actorId: manager.userId };
 
     await updateStaffMember(asManager, { memberId: cashier.memberId, name: "Cashier Two", phone: "0750 000 0000", role: "STAFF", actorRole: "MANAGER" });
