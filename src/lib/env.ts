@@ -33,6 +33,8 @@ const envSchema = z.object({
   PAYMENTS_MODE: z.enum(["mock", "disabled"]).default("mock"),
   /** Minutes an unpaid online booking holds its slot. */
   PAYMENT_HOLD_MINUTES: z.coerce.number().int().min(5).max(60).default(15),
+  /** The one branch this deployment runs (a lounge id). Unset: the oldest lounge. */
+  PRIMARY_LOUNGE_ID: optionalString,
 });
 
 const MIN_SECRET_LENGTH = 32;

@@ -3,7 +3,7 @@ import { firestoreAdapter } from "@/server/auth-adapter";
 import { db } from "@/server/db";
 import { checkStaffPin } from "@/server/services/pos-pin";
 import { addStaffMember, grantLoungeAccess, listLoungeStaff, revokeLoungeAccess, updateStaffMember } from "@/server/services/staff-access";
-import { getLoungeAccess, getPlatformRole, listManagedLounges } from "@/server/staff";
+import { getLoungeAccess, getManagedLounge, getPlatformRole } from "@/server/staff";
 
 /**
  * Cashier access by Gmail address: granting prepares (or promotes) the account and the
@@ -40,7 +40,7 @@ describe("granting cashier access to a Gmail address", () => {
     const user = await db.user.findUniqueOrThrow({ where: { email } });
     expect(user).toMatchObject({ role: "STAFF", passwordHash: null, isActive: true });
     expect(await getLoungeAccess(user.id, loungeId)).toEqual({ loungeId, role: "STAFF" });
-    expect((await listManagedLounges(user.id, "STAFF")).map((l) => l.id)).toEqual([loungeId]);
+    expect(await getManagedLounge(user.id)).toMatchObject({ id: loungeId, role: "STAFF" });
 
     // Auth.js on first Google sign-in: no account for this Google id, so it looks the email up and links.
     const adapter = firestoreAdapter();

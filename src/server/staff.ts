@@ -1,4 +1,6 @@
 import "server-only";
+import { cache } from "react";
+import { env } from "@/lib/env";
 import type { LoungeMemberRole, Role } from "@/lib/db/types";
 import { db } from "@/server/db";
 
@@ -33,11 +35,23 @@ export function hasLoungeRole(access: LoungeAccess, min: LoungeMemberRole): bool
 }
 
 /**
+ * The single branch this deployment runs: PRIMARY_LOUNGE_ID, or else the oldest lounge. Every
+ * POS, dashboard, staff and shift screen is locked to it; null only while there are no lounges.
+ */
+export const getPrimaryLoungeId = cache(async (): Promise<string | null> => {
+  if (env.PRIMARY_LOUNGE_ID) return (await loungeExists(env.PRIMARY_LOUNGE_ID)) ? env.PRIMARY_LOUNGE_ID : null;
+  const oldest = await db.lounge.findFirst({ orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true } });
+  return oldest?.id ?? null;
+});
+
+/**
  * The user's access to a lounge, from the database (not the JWT), so revoked
  * memberships, role changes and deactivated accounts take effect immediately.
  * Needs a staff platform role (STAFF_ROLES) plus a membership, or SUPER_ADMIN.
+ * Only the primary branch can be worked; every other lounge gets null.
  */
 export async function getLoungeAccess(userId: string, loungeId: string): Promise<LoungeAccess | null> {
+  if (loungeId !== (await getPrimaryLoungeId())) return null;
   const user = await db.user.findUnique({
     where: { id: userId },
     select: {
@@ -47,10 +61,8 @@ export async function getLoungeAccess(userId: string, loungeId: string): Promise
     },
   });
   if (!user?.isActive || !isStaffRole(user.role)) return null;
-  if (user.role === "SUPER_ADMIN") {
-    const exists = await db.lounge.count({ where: { id: loungeId } });
-    return exists ? { loungeId, role: "OWNER" } : null;
-  }
+  // The primary lounge exists (getPrimaryLoungeId checked), so super admins need no further lookup.
+  if (user.role === "SUPER_ADMIN") return { loungeId, role: "OWNER" };
   const membership = user.memberships[0];
   return membership ? { loungeId, role: membership.role } : null;
 }
@@ -59,27 +71,11 @@ export async function loungeExists(loungeId: string): Promise<boolean> {
   return (await db.lounge.count({ where: { id: loungeId } })) > 0;
 }
 
-/** Lounges the user can open in the dashboard. */
-export async function listManagedLounges(userId: string, platformRole: Role) {
-  if (!isStaffRole(platformRole)) return [];
-  const lounges = await db.lounge.findMany({
-    where: platformRole === "SUPER_ADMIN" ? {} : { members: { some: { userId, isActive: true } } },
-    orderBy: [{ city: "asc" }, { name: "asc" }],
-    select: {
-      id: true,
-      name: true,
-      city: true,
-      status: true,
-      members: { where: { userId }, select: { role: true } },
-      _count: { select: { devices: { where: { archivedAt: null } } } },
-    },
-  });
-  return lounges.map((l) => ({
-    id: l.id,
-    name: l.name,
-    city: l.city,
-    status: l.status,
-    role: (l.members[0]?.role ?? "OWNER") as LoungeMemberRole,
-    deviceCount: l._count.devices,
-  }));
+/** The branch the user works at: the primary lounge, when they have access to it. */
+export async function getManagedLounge(userId: string) {
+  const loungeId = await getPrimaryLoungeId();
+  const access = loungeId ? await getLoungeAccess(userId, loungeId) : null;
+  if (!access) return null;
+  const lounge = await db.lounge.findUnique({ where: { id: access.loungeId }, select: { id: true, name: true, city: true } });
+  return lounge ? { ...lounge, role: access.role } : null;
 }

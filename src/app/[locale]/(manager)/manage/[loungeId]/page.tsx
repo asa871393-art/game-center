@@ -65,7 +65,6 @@ async function LoadFailed({ locale, loungeId }: { locale: Locale; loungeId: stri
       hint={dict.manage.loadFailedHint}
       actions={[
         { href: localePath(locale, `/manage/${encodeURIComponent(loungeId)}`), label: dict.common.retry, primary: true },
-        { href: localePath(locale, "/manage"), label: dict.manage.backToLounges },
       ]}
     />
   );

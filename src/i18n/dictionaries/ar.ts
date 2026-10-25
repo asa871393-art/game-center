@@ -248,13 +248,11 @@ const ar = {
   },
   manage: {
     title: "لوحة التحكم",
-    chooseLounge: "اختر الصالة",
     noLounges: "لا توجد صالات مرتبطة بحسابك. اطلب من مالك الصالة إضافتك.",
     loungeNotFound: "الصالة غير موجودة أو تم حذفها",
     loungeNotFoundHint: "تحقق من الرابط، أو اختر صالة من قائمة الصالات المرتبطة بحسابك.",
     loadFailed: "تعذّر تحميل بيانات الصالة",
     loadFailedHint: "حدثت مشكلة في الاتصال بقاعدة البيانات. حاول مرة أخرى بعد قليل.",
-    backToLounges: "العودة إلى الصالات",
     role: { OWNER: "مالك", MANAGER: "مدير", STAFF: "موظف" },
     businessDay: "يوم العمل: {date}",
     connection: {
@@ -432,7 +430,6 @@ const ar = {
     clearCart: "تفريغ",
     itemsCount: "{count} منتج",
     toPayment: "متابعة للدفع",
-    chooseLounge: "اختر الصالة لفتح نقطة البيع",
     cashier: "الكاشير",
     quickActions: "إجراءات سريعة",
     ordersQueue: "الطلبات",

@@ -9,11 +9,12 @@ import { PIN_PATTERN } from "@/lib/pin";
 import { posCallback } from "@/lib/pos-login";
 import { POS_TERMINAL_COOKIE, readTerminal, signPinTicket } from "@/lib/pos-terminal";
 import { checkStaffPin } from "@/server/services/pos-pin";
+import { getPrimaryLoungeId } from "@/server/staff";
 
 /**
  * POS PIN sign-in: { userId, pin, locale?, callbackUrl? } from the keypad on /pos/login.
- * Works only from a registered cashier terminal (signed cookie naming the lounge), for members
- * of that lounge, and five wrong PINs in a row lock the account's PIN sign-in for a minute.
+ * Works only from a registered cashier terminal (signed cookie naming the lounge, which must be
+ * the branch's primary lounge), for members of that lounge, and five wrong PINs in a row lock the account's PIN sign-in for a minute.
  *
  * 200 { redirectTo }                   signed in (Auth.js session cookie set)
  * 400 { error: "VALIDATION" }          malformed body
@@ -35,7 +36,7 @@ export async function POST(request: NextRequest) {
   if (origin && origin !== request.nextUrl.origin) return NextResponse.json({ error: "NO_TERMINAL" }, { status: 403 });
 
   const loungeId = readTerminal((await cookies()).get(POS_TERMINAL_COOKIE)?.value, authSecret);
-  if (!loungeId) return NextResponse.json({ error: "NO_TERMINAL" }, { status: 403 });
+  if (!loungeId || loungeId !== (await getPrimaryLoungeId())) return NextResponse.json({ error: "NO_TERMINAL" }, { status: 403 });
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "VALIDATION" }, { status: 400 });

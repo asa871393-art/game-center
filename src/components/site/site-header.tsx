@@ -2,7 +2,7 @@ import { Gamepad2 } from "lucide-react";
 import Link from "next/link";
 import { Suspense } from "react";
 import { getSession } from "@/server/session";
-import { getPlatformRole, isStaffRole, listManagedLounges } from "@/server/staff";
+import { getManagedLounge } from "@/server/staff";
 import { buttonVariants } from "@/components/ui/button";
 import { Skeleton } from "@/components/ui/skeleton";
 import { localePath } from "@/i18n/config";
@@ -41,14 +41,11 @@ export async function SiteHeader() {
   );
 }
 
-/** POS, management, staff and shift-report links, for lounge staff only. */
+/** POS, management, staff and shift-report links, for staff of the branch only. */
 async function StaffNavArea() {
   const session = await getSession();
-  if (!session?.user?.id) return null;
-  const role = await getPlatformRole(session.user.id);
-  if (!role || !isStaffRole(role)) return null;
-  const lounges = await listManagedLounges(session.user.id, role);
-  return <StaffNav defaultLoungeId={lounges.length === 1 ? lounges[0].id : null} />;
+  const lounge = session?.user?.id ? await getManagedLounge(session.user.id) : null;
+  return lounge ? <StaffNav loungeId={lounge.id} /> : null;
 }
 
 async function AuthArea() {

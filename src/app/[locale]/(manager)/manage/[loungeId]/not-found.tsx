@@ -14,8 +14,8 @@ export default async function LoungeNotFound() {
         title={dict.manage.loungeNotFound}
         hint={dict.manage.loungeNotFoundHint}
         actions={[
-          { href: localePath(locale, "/manage"), label: dict.manage.backToLounges, primary: true },
-          { href: localePath(locale), label: dict.nav.home },
+          { href: localePath(locale, "/manage"), label: dict.nav.manageLounge, primary: true },
+          { href: localePath(locale, "/pos"), label: dict.nav.posTerminal },
         ]}
       />
     </main>

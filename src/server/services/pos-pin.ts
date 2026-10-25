@@ -15,7 +15,7 @@ import {
 } from "@/lib/pin";
 import { POS_TERMINAL_COOKIE, readTerminal } from "@/lib/pos-terminal";
 import { db } from "@/server/db";
-import { isStaffRole } from "@/server/staff";
+import { getPrimaryLoungeId, isStaffRole } from "@/server/staff";
 import { PosError, type PosContext } from "./pos";
 
 /** PIN sign-in at a lounge's cashier terminal, and the PIN management on the staff screen. */
@@ -48,10 +48,13 @@ export interface TerminalLounge {
   staff: PinStaffMember[];
 }
 
-/** The lounge this browser is a locked cashier terminal for, with who can sign in by PIN there. */
+/**
+ * The branch's lounge when this browser is a locked cashier terminal for it, with who can sign
+ * in by PIN there. A terminal registered to any other lounge is ignored.
+ */
 export async function getTerminalLounge(): Promise<TerminalLounge | null> {
   const loungeId = readTerminal((await cookies()).get(POS_TERMINAL_COOKIE)?.value, authSecret);
-  if (!loungeId) return null;
+  if (!loungeId || loungeId !== (await getPrimaryLoungeId())) return null;
   const [lounge, staff] = await Promise.all([
     db.lounge.findUnique({ where: { id: loungeId }, select: { id: true, name: true } }),
     listPinStaff(loungeId),

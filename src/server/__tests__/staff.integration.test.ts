@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/server/db";
-import { getLoungeAccess, listManagedLounges } from "@/server/staff";
+import { getLoungeAccess, getManagedLounge, getPrimaryLoungeId } from "@/server/staff";
 
 /** Who may open a lounge's POS: a staff platform role plus a membership, or a super admin. */
 
@@ -27,13 +27,13 @@ describe("POS access gate", () => {
   it("lets a STAFF member in with their membership role", async () => {
     const id = await userWith("STAFF", true);
     expect(await getLoungeAccess(id, loungeId)).toEqual({ loungeId, role: "STAFF" });
-    expect((await listManagedLounges(id, "STAFF")).map((l) => l.id)).toEqual([loungeId]);
+    expect(await getManagedLounge(id)).toMatchObject({ id: loungeId, role: "STAFF" });
   });
 
   it("refuses a CUSTOMER even when they hold a membership", async () => {
     const id = await userWith("CUSTOMER", true);
     expect(await getLoungeAccess(id, loungeId)).toBeNull();
-    expect(await listManagedLounges(id, "CUSTOMER")).toEqual([]);
+    expect(await getManagedLounge(id)).toBeNull();
   });
 
   it("refuses STAFF without a membership and deactivated staff", async () => {
@@ -45,5 +45,12 @@ describe("POS access gate", () => {
     const id = await userWith("SUPER_ADMIN", false);
     expect(await getLoungeAccess(id, loungeId)).toEqual({ loungeId, role: "OWNER" });
     expect(await getLoungeAccess(id, "no-such-lounge")).toBeNull();
+  });
+
+  it("locks everyone, super admins included, to the primary branch (the oldest lounge: nexus-downtown in the seed)", async () => {
+    expect(await getPrimaryLoungeId()).toBe(loungeId);
+    const other = (await db.lounge.findUniqueOrThrow({ where: { slug: "pixel-hub-erbil" }, select: { id: true } })).id;
+    const admin = (await db.user.findUniqueOrThrow({ where: { email: `${RUN}-SUPER_ADMIN-false-true@test.dev`.toLowerCase() } })).id;
+    expect(await getLoungeAccess(admin, other)).toBeNull();
   });
 });
