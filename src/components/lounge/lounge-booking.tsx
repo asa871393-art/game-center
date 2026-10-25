@@ -12,7 +12,6 @@ export function LoungeBooking(props: {
   lounge: LoungeDetails;
   checkoutOptions: CheckoutOption[];
   isSignedIn: boolean;
-  googleEnabled: boolean;
 }) {
   const openFor = useBookingDraft((s) => s.openFor);
   const { lounge } = props;

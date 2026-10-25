@@ -37,7 +37,7 @@ async function OpenBranch() {
   // From the database, so access a manager just granted works without signing in again.
   const role = await getPlatformRole(session.user.id);
   if (!role || !isStaffRole(role)) {
-    return <ManagersOnly locale={locale} email={session.user.email ?? ""} path="/pos" viaGoogle={session.user.provider === "google"} />;
+    return <ManagersOnly locale={locale} email={session.user.email ?? ""} path="/pos" />;
   }
   const lounge = await getManagedLounge(session.user.id);
   if (lounge) redirect(localePath(locale, `/pos/${lounge.id}`));

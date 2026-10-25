@@ -1,5 +1,6 @@
 import "server-only";
 import type { LoungeMemberRole, Role } from "@/lib/db/types";
+import { hashPin, isWeakPin } from "@/lib/pin";
 import { canManageMember } from "@/lib/staff-permissions";
 import { db, type TxClient } from "@/server/db";
 import { isStaffRole } from "@/server/staff";
@@ -96,16 +97,23 @@ export async function grantLoungeAccess(ctx: PosContext | { loungeId: string; ac
 }
 
 /**
- * "Add new staff" on the dashboard: grants access like grantLoungeAccess, with the person's name
- * and phone. Only owners add managers.
+ * "Add new staff" on the dashboard: grants access like grantLoungeAccess, with the person's name,
+ * phone and an optional first PIN. Only owners add managers; a PIN is set only where the actor
+ * may manage that member's PIN (so a manager can't set an owner's by re-adding them).
  */
 export async function addStaffMember(
   ctx: PosContext,
-  input: GrantInput & { actorRole: LoungeMemberRole },
+  input: GrantInput & { pin: string | null; actorRole: LoungeMemberRole },
 ): Promise<GrantResult> {
   if (input.role === "MANAGER" && input.actorRole !== "OWNER") throw new PosError("FORBIDDEN");
+  if (input.pin !== null && isWeakPin(input.pin)) throw new PosError("WEAK_PIN");
+  const pinHash = input.pin === null ? null : await hashPin(input.pin);
   return db.$transaction(async (tx) => {
     const result = await grantIn(tx, ctx.loungeId, input);
+    if (pinHash) {
+      if (!canManageMember(input.actorRole, result.role, result.userId === ctx.actorId)) throw new PosError("FORBIDDEN");
+      await tx.user.update({ where: { id: result.userId }, data: { pinHash, pinFailedAttempts: 0, pinLockedUntil: null } });
+    }
     await tx.auditLog.create({
       data: {
         actorId: ctx.actorId,
@@ -113,7 +121,7 @@ export async function addStaffMember(
         action: "staff.add",
         entityType: "LoungeMember",
         entityId: result.memberId,
-        data: { email: input.email.trim().toLowerCase(), role: input.role, created: result.created, promoted: result.promoted },
+        data: { email: input.email.trim().toLowerCase(), role: input.role, created: result.created, promoted: result.promoted, pinSet: !!pinHash },
       },
     });
     return result;
@@ -187,8 +195,8 @@ export interface LoungeStaffRow {
   role: LoungeMemberRole;
   /** Holds the lounge's open cashier shift. */
   onShift: boolean;
-  /** Has signed in with Google at least once (a linked Google account). */
-  googleLinked: boolean;
+  /** Has a PIN, so can sign in. */
+  hasPin: boolean;
   accountActive: boolean;
 }
 
@@ -199,7 +207,7 @@ export async function listLoungeStaff(loungeId: string): Promise<LoungeStaffRow[
       where: { loungeId, isActive: true },
       include: {
         user: {
-          select: { id: true, name: true, email: true, phone: true, isActive: true, accounts: { select: { provider: true } } },
+          select: { id: true, name: true, email: true, phone: true, isActive: true, pinHash: true },
         },
       },
     }),
@@ -215,7 +223,7 @@ export async function listLoungeStaff(loungeId: string): Promise<LoungeStaffRow[
       phone: m.user.phone,
       role: m.role,
       onShift: shift?.cashierId === m.userId,
-      googleLinked: m.user.accounts.some((a) => a.provider === "google"),
+      hasPin: !!m.user.pinHash,
       accountActive: m.user.isActive,
     }))
     .sort((a, b) => rank[a.role] - rank[b.role] || (a.email ?? "").localeCompare(b.email ?? ""));

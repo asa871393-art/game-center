@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Loader2, Pencil, UserMinus, UserPlus } from "lucide-react";
+import { ArrowLeft, ArrowRight, Grid3x3, Loader2, Pencil, UserMinus, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -12,9 +12,10 @@ import { Label } from "@/components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useI18n } from "@/i18n/client";
 import type { LoungeMemberRole } from "@/lib/db/types";
+import { PIN_MAX_LENGTH, PIN_PATTERN } from "@/lib/pin";
 import { canManageMember } from "@/lib/staff-permissions";
 import { cn } from "@/lib/utils";
-import { addStaffAction, revokeStaffAction, updateStaffAction } from "@/server/actions/staff";
+import { addStaffAction, revokeStaffAction, setStaffPinAction, updateStaffAction } from "@/server/actions/staff";
 import type { LoungeStaffRow } from "@/server/services/staff-access";
 
 export interface StaffManagerData {
@@ -24,7 +25,7 @@ export interface StaffManagerData {
 }
 
 type GrantRole = "STAFF" | "MANAGER";
-type Dialogs = { kind: "add" } | { kind: "edit"; member: LoungeStaffRow } | null;
+type Dialogs = { kind: "add" } | { kind: "edit"; member: LoungeStaffRow } | { kind: "pin"; member: LoungeStaffRow } | null;
 
 const roleTone: Record<LoungeMemberRole, string> = {
   OWNER: "bg-violet-500/15 text-violet-700 dark:text-violet-300",
@@ -34,9 +35,10 @@ const roleTone: Record<LoungeMemberRole, string> = {
 
 const PHONE = /^\+?[\d\s()-]{6,32}$/;
 const EMAIL = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+const digits = (v: string) => v.replace(/\D/g, "").slice(0, PIN_MAX_LENGTH);
 const label = (m: LoungeStaffRow) => m.name ?? m.email ?? "";
 
-/** Dashboard staff screen: the lounge's team with role and shift status, and the add/edit/unassign actions. */
+/** Dashboard staff screen: the lounge's team with role, shift and PIN status, and the add/edit/PIN/unassign actions. */
 export function StaffManager({ data }: { data: StaffManagerData }) {
   const { dict, href, dir, locale, t } = useI18n();
   const s = dict.staffManage;
@@ -89,6 +91,7 @@ export function StaffManager({ data }: { data: StaffManagerData }) {
               <TableHead>{s.member}</TableHead>
               <TableHead>{s.role}</TableHead>
               <TableHead>{s.shift}</TableHead>
+              <TableHead>{s.pin}</TableHead>
               <TableHead className="text-end">{s.actions}</TableHead>
             </TableRow>
           </TableHeader>
@@ -127,12 +130,21 @@ export function StaffManager({ data }: { data: StaffManagerData }) {
                   )}
                 </TableCell>
                 <TableCell>
+                  {m.hasPin ? <Badge variant="secondary">{s.pinSet}</Badge> : <span className="text-xs text-muted-foreground">{s.pinMissing}</span>}
+                </TableCell>
+                <TableCell>
                   <div className="flex justify-end gap-1">
                     {canEdit(m) && (
-                      <Button variant="ghost" size="sm" disabled={pending} onClick={() => setDialog({ kind: "edit", member: m })}>
-                        <Pencil aria-hidden />
-                        {s.edit}
-                      </Button>
+                      <>
+                        <Button variant="ghost" size="sm" disabled={pending} onClick={() => setDialog({ kind: "edit", member: m })}>
+                          <Pencil aria-hidden />
+                          {s.edit}
+                        </Button>
+                        <Button variant="ghost" size="sm" disabled={pending} onClick={() => setDialog({ kind: "pin", member: m })}>
+                          <Grid3x3 aria-hidden />
+                          {s.pin}
+                        </Button>
+                      </>
                     )}
                     {canUnassign(m) && (
                       <Button variant="ghost" size="sm" className="text-destructive" disabled={pending} onClick={() => unassign(m)}>
@@ -160,6 +172,7 @@ export function StaffManager({ data }: { data: StaffManagerData }) {
               onDone={() => setDialog(null)}
             />
           )}
+          {dialog?.kind === "pin" && <PinForm loungeId={data.lounge.id} member={dialog.member} onDone={() => setDialog(null)} />}
         </DialogContent>
       </Dialog>
     </div>
@@ -173,8 +186,10 @@ function AddForm({ loungeId, isOwner, onDone }: { loungeId: string; isOwner: boo
   const [email, setEmail] = useState("");
   const [phone, setPhone] = useState("");
   const [role, setRole] = useState<GrantRole>("STAFF");
+  const [pin, setPin] = useState("");
   const [pending, startTransition] = useTransition();
-  const valid = name.trim().length > 0 && EMAIL.test(email.trim()) && (!phone.trim() || PHONE.test(phone.trim()));
+  const valid =
+    name.trim().length > 0 && EMAIL.test(email.trim()) && (!phone.trim() || PHONE.test(phone.trim())) && (!pin || PIN_PATTERN.test(pin));
 
   const submit = () =>
     startTransition(async () => {
@@ -185,6 +200,7 @@ function AddForm({ loungeId, isOwner, onDone }: { loungeId: string; isOwner: boo
         email: email.trim().toLowerCase(),
         phone: phone.trim() || null,
         role,
+        pin: pin || null,
       });
       if (!res.ok) {
         toast.error(res.error);
@@ -227,6 +243,9 @@ function AddForm({ loungeId, isOwner, onDone }: { loungeId: string; isOwner: boo
         <Input id="staff-phone" type="tel" inputMode="tel" dir="ltr" maxLength={32} value={phone} onChange={(e) => setPhone(e.target.value)} />
       </Field>
       <RolePicker value={role} onChange={setRole} managerAllowed={isOwner} />
+      <Field id="staff-pin" label={`${s.initialPin} (${s.optional})`} hint={s.pinHint}>
+        <PinInput id="staff-pin" value={pin} onChange={setPin} />
+      </Field>
       <DialogFooter>
         <Button type="submit" disabled={!valid || pending}>
           {pending ? <Loader2 className="animate-spin" aria-hidden /> : <UserPlus aria-hidden />}
@@ -306,12 +325,81 @@ function EditForm({
   );
 }
 
-function Field({ id, label, children }: { id: string; label: string; children: React.ReactNode }) {
+function PinForm({ loungeId, member, onDone }: { loungeId: string; member: LoungeStaffRow; onDone: () => void }) {
+  const { dict, locale, t } = useI18n();
+  const s = dict.staffManage;
+  const [pin, setPin] = useState("");
+  const [pending, startTransition] = useTransition();
+
+  const save = (value: string | null) => {
+    if (value === null && !window.confirm(t(s.confirmRemovePin, { name: label(member) }))) return;
+    startTransition(async () => {
+      const res = await setStaffPinAction({ locale, loungeId, memberId: member.memberId, pin: value });
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(value === null ? s.pinRemoved : s.pinSaved);
+      onDone();
+    });
+  };
+
+  return (
+    <form
+      className="space-y-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        if (PIN_PATTERN.test(pin) && !pending) save(pin);
+      }}
+    >
+      <DialogHeader>
+        <DialogTitle>{t(s.pinTitle, { name: label(member) })}</DialogTitle>
+        <DialogDescription>{member.hasPin ? s.pinSet : s.pinMissing}</DialogDescription>
+      </DialogHeader>
+      <Field id="pin-new" label={s.newPin} hint={s.pinHint}>
+        <PinInput id="pin-new" value={pin} onChange={setPin} autoFocus />
+      </Field>
+      <DialogFooter className="gap-2">
+        {member.hasPin && (
+          <Button type="button" variant="ghost" className="text-destructive" disabled={pending} onClick={() => save(null)}>
+            {s.removePin}
+          </Button>
+        )}
+        <Button type="submit" disabled={!PIN_PATTERN.test(pin) || pending}>
+          {pending && <Loader2 className="animate-spin" aria-hidden />}
+          {s.save}
+        </Button>
+      </DialogFooter>
+    </form>
+  );
+}
+
+function Field({ id, label, hint, children }: { id: string; label: string; hint?: string; children: React.ReactNode }) {
   return (
     <div className="space-y-1.5">
       <Label htmlFor={id}>{label}</Label>
       {children}
+      {hint && <p className="text-xs text-muted-foreground">{hint}</p>}
     </div>
+  );
+}
+
+function PinInput({ id, value, onChange, autoFocus }: { id: string; value: string; onChange: (v: string) => void; autoFocus?: boolean }) {
+  const { dict } = useI18n();
+  return (
+    <Input
+      id={id}
+      type="password"
+      inputMode="numeric"
+      autoComplete="new-password"
+      dir="ltr"
+      autoFocus={autoFocus}
+      maxLength={PIN_MAX_LENGTH}
+      placeholder={dict.staffAdmin.pinPlaceholder}
+      className="text-center font-mono text-lg tracking-[0.4em]"
+      value={value}
+      onChange={(e) => onChange(digits(e.target.value))}
+    />
   );
 }
 

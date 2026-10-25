@@ -1,7 +1,9 @@
 "use server";
 
 import { z } from "zod";
+import { PIN_PATTERN } from "@/lib/pin";
 import { PosError } from "@/server/services/pos";
+import { setMemberPin } from "@/server/services/pos-pin";
 import { addStaffMember, grantLoungeAccess, revokeLoungeAccess, updateStaffMember } from "@/server/services/staff-access";
 import { getLoungeAccess } from "@/server/staff";
 import { actionId as id, loungeScoped as base, runLoungeAction as run } from "./pipeline";
@@ -37,6 +39,16 @@ export async function revokeStaffAction(payload: z.input<typeof revokeSchema>) {
   });
 }
 
+const pinSchema = base.extend({ memberId: id, pin: z.string().regex(PIN_PATTERN).nullable() });
+
+/** Sets a member's POS PIN, or removes it with `pin: null`. */
+export async function setStaffPinAction(payload: z.input<typeof pinSchema>) {
+  return run(pinSchema, payload, "MANAGER", async (ctx, i) => {
+    await setMemberPin(ctx, { memberId: i.memberId, pin: i.pin, actorRole: await actorRole(ctx) });
+    return null;
+  });
+}
+
 const name = z.string().trim().min(1).max(80);
 /** Optional phone: digits with the usual separators; empty means none. */
 const phone = z
@@ -47,9 +59,9 @@ const phone = z
   .nullable()
   .transform((v) => v || null);
 
-const addSchema = grantSchema.extend({ name, phone });
+const addSchema = grantSchema.extend({ name, phone, pin: z.string().regex(PIN_PATTERN).nullable() });
 
-/** "Add new staff" on the dashboard: account details and lounge role in one go. */
+/** "Add new staff" on the dashboard: account details, lounge role and a first PIN in one go. */
 export async function addStaffAction(payload: z.input<typeof addSchema>) {
   return run(addSchema, payload, "MANAGER", async (ctx, i) => {
     const result = await addStaffMember(ctx, { ...i, actorRole: await actorRole(ctx) });

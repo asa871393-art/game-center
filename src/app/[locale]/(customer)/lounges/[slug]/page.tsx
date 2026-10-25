@@ -8,7 +8,6 @@ import { deviceTypeMeta } from "@/components/lounge/device-type";
 import { LoungeBooking } from "@/components/lounge/lounge-booking";
 import { Skeleton } from "@/components/ui/skeleton";
 import { format, formatMinuteOfDay, money } from "@/i18n/format";
-import { isGoogleAuthEnabled } from "@/lib/env";
 import { getDictionary, getLocale } from "@/i18n/server";
 import { getAvailableCheckoutMethods } from "@/server/payments";
 import { getLoungeDetails } from "@/server/queries/lounges";
@@ -66,7 +65,7 @@ async function LoungeContent({ params }: Pick<PageProps<"/[locale]/lounges/[slug
           <h2 id="floor-plan-heading" className="mb-3 text-xl font-bold">
             {dict.lounge.floorPlan}
           </h2>
-          <LoungeBooking lounge={lounge} checkoutOptions={getAvailableCheckoutMethods()} isSignedIn={!!session?.user} googleEnabled={isGoogleAuthEnabled} />
+          <LoungeBooking lounge={lounge} checkoutOptions={getAvailableCheckoutMethods()} isSignedIn={!!session?.user} />
         </section>
 
         <aside className="space-y-6">

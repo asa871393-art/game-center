@@ -36,7 +36,6 @@ async function Terminal({ loungeId }: { loungeId: string }) {
         locale={locale}
         email={session.user.email ?? ""}
         path={`/pos/${loungeId}`}
-        viaGoogle={session.user.provider === "google"}
       />
     );
   }

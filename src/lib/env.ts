@@ -12,11 +12,6 @@ const envSchema = z.object({
   /** Signs session JWTs. NEXTAUTH_SECRET (the Auth.js v4 name) is accepted when AUTH_SECRET is unset. */
   AUTH_SECRET: optionalString,
   NEXTAUTH_SECRET: optionalString,
-  /** Google OAuth is enabled only when both are set (GOOGLE_CLIENT_* or Auth.js's AUTH_GOOGLE_* names). */
-  GOOGLE_CLIENT_ID: optionalString,
-  GOOGLE_CLIENT_SECRET: optionalString,
-  AUTH_GOOGLE_ID: optionalString,
-  AUTH_GOOGLE_SECRET: optionalString,
   NEXT_PUBLIC_APP_URL: z.url().default("http://localhost:3000"),
   /**
    * Firebase. Firestore is the database: the Admin SDK needs project id + service-account email + private key
@@ -63,13 +58,6 @@ export const env = parsed.data;
 
 /** The session-signing secret, under whichever name the deployment set it. */
 export const authSecret: string = (env.AUTH_SECRET ?? env.NEXTAUTH_SECRET)!;
-
-export const googleOAuth = {
-  clientId: env.GOOGLE_CLIENT_ID ?? env.AUTH_GOOGLE_ID,
-  clientSecret: env.GOOGLE_CLIENT_SECRET ?? env.AUTH_GOOGLE_SECRET,
-};
-
-export const isGoogleAuthEnabled = Boolean(googleOAuth.clientId && googleOAuth.clientSecret);
 
 /** Service-account credentials for the Admin SDK, or null when Firebase isn't configured. */
 export const firebaseAdminConfig =

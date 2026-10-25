@@ -24,7 +24,8 @@ npm run db:seed               # 3 lounges (Baghdad ×2, Erbil), menus, 4 users
 npm run dev                   # http://localhost:3000 → redirects to /ar
 ```
 
-Demo logins (password `Password123!`): `admin@`, `owner@`, `staff@`, `player@gamelounge.dev`.
+Demo PIN sign-in on `/ar/pos/login` (pick the name, type the PIN): Platform Admin `2580`, Lounge Owner `4826`,
+Front Desk `1793`, Demo Player `3691`.
 `player@` is also a super admin, so it can manage every lounge's POS, devices and menu. The emulator keeps no data
 between runs; seed again after restarting it.
 
@@ -36,8 +37,8 @@ between runs; seed again after restarting it.
 | `test:integration` | Starts the Firestore emulator, seeds it, runs the booking, payment, POS, realtime and data-layer suites |
 | `typecheck` / `lint` / `build` | Static checks and production build (no Firebase credentials needed) |
 | `db:emulator` | Local Firestore emulator (port 8085) |
-| `db:seed` | Demo data into the configured project, or the emulator when `FIRESTORE_EMULATOR_HOST` is set (`SEED_STAFF_EMAILS` adds Gmail cashiers) |
-| `staff:grant` | Gives a Google account cashier/manager access: `npm run staff:grant -- ali@gmail.com [--lounge <slug>] [--role MANAGER]`, or `-- --list` |
+| `db:seed` | Demo data into the configured project, or the emulator when `FIRESTORE_EMULATOR_HOST` is set (`SEED_STAFF_EMAILS` adds cashiers without a PIN) |
+| `staff:grant` | Gives an account cashier/manager/super-admin access and its PIN: `npm run staff:grant -- ali@example.com [--lounge <slug>] [--role MANAGER\|SUPER_ADMIN] [--pin 4821]`, or `-- --list` |
 | `firestore:deploy` | Deploys `firestore.rules` and `firestore.indexes.json` (`firebase login` first) |
 
 Integration tests never touch a real project: they refuse to start without `FIRESTORE_EMULATOR_HOST` and drop the
@@ -52,7 +53,7 @@ service-account variables. The emulator needs a Java 21+ runtime on `PATH`.
   snacks/drinks pre-order → payment method and notes. The price preview uses the same pricing code as the server.
 - **Checkout**: *Pay at the lounge* (confirmed immediately, unpaid) or *ZainCash / FastPay* (sandbox, see below).
 - **Confirmation** (`/[locale]/bookings/[reference]`) and **My bookings** (`/[locale]/account/bookings`).
-- **Auth**: email/password and Google (`/[locale]/login`, `/[locale]/register`).
+- **Auth**: PIN sign-in only, on `/[locale]/pos/login`.
 
 ## Lounge dashboard & POS (Phase 3)
 
@@ -300,40 +301,20 @@ service firebase.storage {
 Token URLs keep working with these rules. `@grpc/grpc-js` is pinned to 1.14.6 via `overrides` (Firestore's own pin
 has advisories).
 
-## Google sign-in
+## Sign-in (PIN only)
 
-1. Google Cloud Console → APIs & Services → OAuth consent screen: set it up (External, add your test users while
-   it is in "Testing").
-2. Credentials → Create credentials → OAuth client ID → Web application. Authorized redirect URI:
-   `http://localhost:3000/api/auth/callback/google` (plus `https://<your-domain>/api/auth/callback/google` in production).
-3. Put the client ID and secret in `.env` as `GOOGLE_CLIENT_ID` and `GOOGLE_CLIENT_SECRET` (Auth.js's
-   `AUTH_GOOGLE_ID` / `AUTH_GOOGLE_SECRET` names also work) and restart `npm run dev`.
+Everyone signs in at `/[locale]/pos/login`: pick your name on the branch's keypad and type your 4-6 digit PIN. Every
+staff page sends signed-out visitors there and returns to it afterwards. There are no passwords and no Google sign-in.
 
-"تسجيل الدخول باستخدام جوجل" then works on the login and register pages and at the booking checkout. In development
-without keys, the login page shows the button disabled with a setup hint; in production it is hidden.
+- The keypad lists active members of the branch (the primary lounge) who have a PIN, plus super admins with one.
+- `/api/auth/pos-pin` checks the PIN and hands a one-minute signed ticket to the Auth.js `pos-pin` credentials provider,
+  which re-checks access to the branch; the session carries the role and the branch.
+- Wrong PINs add up per account: every fifth locks PIN sign-in, for a minute the first time and twice as long each
+  time after, up to a day. A correct PIN or a new PIN resets the count. PINs like `1111` or `1234` are refused.
 
-- A first Google sign-in creates a `User` with the default role `CUSTOMER`.
-- If the email already has an account, Google is linked to it (only for Google-verified emails). When that account's
-  email was never verified (self-registration doesn't verify), its password is removed on linking, so someone who
-  registered another person's address can't keep access. Staff and owners keep their roles and passwords.
-
-### Cashier sign-in with Gmail
-
-Cashiers sign in at `/[locale]/pos/login` ("تسجيل الدخول للكاشير بواسطة Gmail"); every POS page sends signed-out
-visitors there. Access is granted per Gmail address, before the cashier ever signs in, in any of three ways:
-
-- **POS → Staff** (`/[locale]/pos/<loungeId>/staff`, managers and owners): enter the address and pick Cashier (or
-  Manager, owners only). The screen also shows the sign-in link to send the cashier.
-- **CLI** against the configured Firestore: `npm run staff:grant -- ali@gmail.com` (every lounge) or
-  `--lounge nexus-downtown`.
-- **Seed**: `SEED_STAFF_EMAILS="ali@gmail.com,sara@gmail.com" npm run db:seed` makes them cashiers at every demo lounge.
-
-Granting creates a password-less `STAFF` user for a new address (or promotes a customer account, dropping a password on
-an unverified one) plus the lounge membership. The first Google sign-in links to that user by email, so it keeps the
-`STAFF` role. Staff then land on the POS (the lounge itself when they work at one). Someone signed in with a Google
-account that has no staff access sees "حساب Gmail هذا لا يمتلك صلاحيات كاشير. يرجى التواصل مع المدير لمنح الصلاحية."
-The POS checks the role in the database, not the session, so granting or removing access applies on the next page load.
-On the regular login page, staff who sign in with no particular destination also go to the POS.
+PINs are set by managers and owners on the staff screens (`/[locale]/manage/<loungeId>/staff`, or POS → Staff), or with
+`npm run staff:grant -- someone@example.com --pin 4821` (add `--role MANAGER` or `--role SUPER_ADMIN`). An account
+without a PIN can't sign in, so give at least one admin a PIN with the CLI before relying on the keypad.
 
 ## Deploying (Netlify)
 
@@ -342,12 +323,11 @@ On the regular login page, staff who sign in with no particular destination also
 1. Set up the Firebase project as in [Firebase](#firebase), including `npm run firestore:deploy`. A query whose
    composite index is missing fails with a Firestore error containing a link that creates it.
 2. In Netlify → Site configuration → Environment variables set `AUTH_SECRET` (`NEXTAUTH_SECRET` also works), `NEXT_PUBLIC_APP_URL` (your site URL),
-   `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, plus the storage bucket and
-   Google keys you use.
-3. For Google sign-in, add `https://<your-site>/api/auth/callback/google` to the OAuth client's redirect URIs.
+   `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, plus the storage bucket you use.
+3. Give an admin a PIN against the production Firestore (`npm run staff:grant -- you@example.com --role SUPER_ADMIN --pin <digits>`).
 
 Don't run `db:seed` against a production project: it creates `player@gamelounge.dev` as a super admin with a published
-password.
+PIN.
 
 ## Layout
 
@@ -355,7 +335,7 @@ password.
 scripts/                   seed-firestore.ts (demo data), firestore-indexes.mjs (index file from logged queries)
 firestore.rules           client-access rules; firebase.json, firestore.indexes.json
 src/proxy.ts               locale redirect
-src/auth.ts                Auth.js config (credentials + optional Google, JWT sessions with role)
+src/auth.ts                Auth.js config (PIN credentials only, JWT sessions with role and branch)
 src/app/[locale]/          root layout (lang/dir), (customer) pages, (manager), (admin)
 src/app/api/               auth handlers, lounge availability, live event streams (SSE)
 src/components/            ui/ (shadcn), site/, search/, lounge/, booking/, auth/, manage/ (POS board)

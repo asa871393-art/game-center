@@ -1,8 +1,7 @@
 "use server";
 
-import { signIn, signOut } from "@/auth";
+import { signOut } from "@/auth";
 import { isLocale, localePath } from "@/i18n/config";
-import { isGoogleAuthEnabled } from "@/lib/env";
 
 /** Only allow same-origin relative redirects ("/ar/..."), never "//evil.com". */
 function safeRedirect(target: FormDataEntryValue | null, locale: string): string {
@@ -11,12 +10,6 @@ function safeRedirect(target: FormDataEntryValue | null, locale: string): string
     return fallback;
   }
   return target;
-}
-
-export async function signInWithGoogle(formData: FormData): Promise<void> {
-  if (!isGoogleAuthEnabled) return;
-  const locale = String(formData.get("locale") ?? "ar");
-  await signIn("google", { redirectTo: safeRedirect(formData.get("callbackUrl"), locale) });
 }
 
 export async function signOutAction(formData: FormData): Promise<void> {

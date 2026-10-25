@@ -1,6 +1,6 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Copy, Loader2, Mail, UserMinus, UserPlus } from "lucide-react";
+import { ArrowLeft, ArrowRight, Copy, Grid3x3, Loader2, UserMinus, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
@@ -8,8 +8,10 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n/client";
 import type { LoungeMemberRole } from "@/lib/db/types";
+import { PIN_MAX_LENGTH, PIN_PATTERN } from "@/lib/pin";
+import { canManageMember } from "@/lib/staff-permissions";
 import { cn } from "@/lib/utils";
-import { grantStaffAction, revokeStaffAction } from "@/server/actions/staff";
+import { grantStaffAction, revokeStaffAction, setStaffPinAction } from "@/server/actions/staff";
 import type { LoungeStaffRow } from "@/server/services/staff-access";
 
 const roleTone: Record<LoungeMemberRole, string> = {
@@ -33,6 +35,8 @@ export function StaffAdmin({ data }: { data: StaffAdminData }) {
   const [role, setRole] = useState<"STAFF" | "MANAGER">("STAFF");
   const [pending, startTransition] = useTransition();
   const [busyId, setBusyId] = useState<string | null>(null);
+  const [pinFor, setPinFor] = useState<string | null>(null);
+  const [pin, setPin] = useState("");
   const Back = dir === "rtl" ? ArrowRight : ArrowLeft;
   const isOwner = data.viewer.role === "OWNER";
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -59,6 +63,24 @@ export function StaffAdmin({ data }: { data: StaffAdminData }) {
       else toast.success(s.removed);
     });
   };
+
+  const savePin = (m: LoungeStaffRow, value: string | null) => {
+    if (value === null && !window.confirm(t(s.confirmRemovePin, { name: m.name ?? m.email ?? "" }))) return;
+    setBusyId(m.memberId);
+    startTransition(async () => {
+      const res = await setStaffPinAction({ locale, loungeId: data.lounge.id, memberId: m.memberId, pin: value });
+      setBusyId(null);
+      if (!res.ok) {
+        toast.error(res.error);
+        return;
+      }
+      toast.success(value === null ? s.pinRemoved : s.pinSaved);
+      setPinFor(null);
+      setPin("");
+    });
+  };
+
+  const canPin = (m: LoungeStaffRow) => m.accountActive && canManageMember(data.viewer.role, m.role, m.userId === data.viewer.userId);
 
   const canRemove = (m: LoungeStaffRow) =>
     m.userId !== data.viewer.userId && m.role !== "OWNER" && (m.role === "STAFF" || isOwner);
@@ -155,17 +177,71 @@ export function StaffAdmin({ data }: { data: StaffAdminData }) {
                   </div>
                 )}
                 <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
-                  <Tag icon={<Mail className="size-3" aria-hidden />} tone={m.googleLinked ? "ok" : "wait"}>
-                    {m.googleLinked ? s.google : s.pendingGoogle}
+                  <Tag icon={<Grid3x3 className="size-3" aria-hidden />} tone={m.hasPin ? "ok" : "wait"}>
+                    {m.hasPin ? s.pinSet : s.pinMissing}
                   </Tag>
                   {!m.accountActive && <Tag tone="bad">{s.disabled}</Tag>}
                 </div>
               </div>
+              {canPin(m) && pinFor !== m.memberId && (
+                <div className="flex gap-1">
+                  <Button
+                    variant="outline"
+                    className="h-11"
+                    disabled={pending}
+                    onClick={() => {
+                      setPinFor(m.memberId);
+                      setPin("");
+                    }}
+                  >
+                    <Grid3x3 aria-hidden />
+                    {m.hasPin ? s.changePin : s.setPin}
+                  </Button>
+                  {m.hasPin && (
+                    <Button variant="ghost" className="h-11 text-muted-foreground" disabled={pending} onClick={() => savePin(m, null)}>
+                      {s.removePin}
+                    </Button>
+                  )}
+                </div>
+              )}
               {canRemove(m) && (
                 <Button variant="ghost" className="h-11 text-destructive" disabled={pending} onClick={() => revoke(m)}>
                   {busyId === m.memberId ? <Loader2 className="animate-spin" aria-hidden /> : <UserMinus aria-hidden />}
                   {s.remove}
                 </Button>
+              )}
+              {pinFor === m.memberId && (
+                <form
+                  className="flex w-full flex-wrap items-center gap-2 border-t pt-3"
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    if (PIN_PATTERN.test(pin) && !pending) savePin(m, pin);
+                  }}
+                >
+                  <label className="flex-1">
+                    <span className="mb-1 block text-sm font-medium">{t(s.newPin, { name: m.name ?? m.email ?? "" })}</span>
+                    <Input
+                      type="password"
+                      inputMode="numeric"
+                      autoComplete="new-password"
+                      dir="ltr"
+                      autoFocus
+                      maxLength={PIN_MAX_LENGTH}
+                      className="h-12 text-center font-mono text-xl tracking-[0.5em]"
+                      placeholder={s.pinPlaceholder}
+                      value={pin}
+                      onChange={(e) => setPin(e.target.value.replace(/\D/g, "").slice(0, PIN_MAX_LENGTH))}
+                    />
+                  </label>
+                  <Button type="submit" size="lg" className="h-12 self-end" disabled={!PIN_PATTERN.test(pin) || pending}>
+                    {busyId === m.memberId ? <Loader2 className="animate-spin" aria-hidden /> : null}
+                    {s.savePin}
+                  </Button>
+                  <Button type="button" size="lg" variant="ghost" className="h-12 self-end" onClick={() => setPinFor(null)}>
+                    {s.cancel}
+                  </Button>
+                  <p className="w-full text-xs text-muted-foreground">{s.pinHint}</p>
+                </form>
               )}
             </li>
           ))}

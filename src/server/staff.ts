@@ -1,5 +1,4 @@
 import "server-only";
-import { cache } from "react";
 import { env } from "@/lib/env";
 import type { LoungeMemberRole, Role } from "@/lib/db/types";
 import { db } from "@/server/db";
@@ -38,11 +37,26 @@ export function hasLoungeRole(access: LoungeAccess, min: LoungeMemberRole): bool
  * The single branch this deployment runs: PRIMARY_LOUNGE_ID, or else the oldest lounge. Every
  * POS, dashboard, staff and shift screen is locked to it; null only while there are no lounges.
  */
-export const getPrimaryLoungeId = cache(async (): Promise<string | null> => {
+export function getPrimaryLoungeId(): Promise<string | null> {
+  // Remembered briefly: it is read on every access check, and changes only when lounges are added or removed.
+  // (Not React's cache(), which route handlers such as /api/auth don't have.)
+  const now = Date.now();
+  if (!primary || primary.expires < now) {
+    const id = findPrimaryLoungeId();
+    primary = { id, expires: now + PRIMARY_TTL_MS };
+    id.catch(() => (primary = null));
+  }
+  return primary.id;
+}
+
+const PRIMARY_TTL_MS = 30_000;
+let primary: { id: Promise<string | null>; expires: number } | null = null;
+
+async function findPrimaryLoungeId(): Promise<string | null> {
   if (env.PRIMARY_LOUNGE_ID) return (await loungeExists(env.PRIMARY_LOUNGE_ID)) ? env.PRIMARY_LOUNGE_ID : null;
   const oldest = await db.lounge.findFirst({ orderBy: [{ createdAt: "asc" }, { id: "asc" }], select: { id: true } });
   return oldest?.id ?? null;
-});
+}
 
 /**
  * The user's access to a lounge, from the database (not the JWT), so revoked

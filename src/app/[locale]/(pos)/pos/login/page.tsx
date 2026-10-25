@@ -1,15 +1,15 @@
-import { MonitorSmartphone, TriangleAlert } from "lucide-react";
+import { Lock, TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
-import { GoogleSignInButton, GoogleSignInUnavailable } from "@/components/auth/auth-forms";
 import { signInErrorMessage } from "@/components/auth/sign-in-errors";
 import { ManagersOnly } from "@/components/pos/managers-only";
+import { PinSignIn } from "@/components/pos/pin-sign-in";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getDictionary, getLocale } from "@/i18n/server";
-import { isGoogleAuthEnabled } from "@/lib/env";
 import { posCallback } from "@/lib/pos-login";
+import { getPinLounge } from "@/server/services/pos-pin";
 import { getSession } from "@/server/session";
 import { getPlatformRole, isStaffRole } from "@/server/staff";
 
@@ -19,7 +19,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /**
- * The only sign-in: a Google button for the account a manager granted access to. Staff who are
+ * The only sign-in: pick your name on the branch's PIN keypad and type your PIN. Staff who are
  * already signed in go straight on to the page they asked for (the POS by default).
  */
 export default function PosLoginPage({ searchParams }: PageProps<"/[locale]/pos/login">) {
@@ -45,22 +45,22 @@ async function CashierLogin({ searchParams }: Pick<PageProps<"/[locale]/pos/logi
         locale={locale}
         email={session.user.email ?? ""}
         path={callbackUrl.replace(/^\/[^/]+/, "")}
-        viaGoogle={session.user.provider === "google"}
       />
     );
   }
 
   const error = typeof sp.error === "string" ? signInErrorMessage(sp.error, dict.auth) : undefined;
   const p = dict.posLogin;
+  const lounge = await getPinLounge();
   return (
     <div className="w-full max-w-md space-y-6 rounded-3xl border bg-card p-6 shadow-lg sm:p-8">
       <div className="space-y-2 text-center">
         <div className="text-sm font-semibold text-primary">
           {dict.common.appName} - {dict.pos.controlTitle}
         </div>
-        <MonitorSmartphone className="mx-auto size-10 text-primary" aria-hidden />
+        <Lock className="mx-auto size-10 text-primary" aria-hidden />
         <h1 className="text-2xl font-bold">{p.title}</h1>
-        <p className="text-sm text-muted-foreground">{p.subtitle}</p>
+        <p className="text-sm text-muted-foreground">{lounge ? `${lounge.name} · ${p.subtitle}` : p.subtitle}</p>
       </div>
 
       {error && (
@@ -70,11 +70,7 @@ async function CashierLogin({ searchParams }: Pick<PageProps<"/[locale]/pos/logi
         </Alert>
       )}
 
-      {isGoogleAuthEnabled ? (
-        <GoogleSignInButton callbackUrl={callbackUrl} label={p.google} size="xl" />
-      ) : (
-        <GoogleSignInUnavailable label={p.google} note={p.notConfigured} size="xl" />
-      )}
+      <PinSignIn lounge={lounge} callbackUrl={callbackUrl} dict={dict} />
     </div>
   );
 }

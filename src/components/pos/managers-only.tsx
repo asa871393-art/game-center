@@ -17,14 +17,11 @@ export async function ManagersOnly({
   loungeId,
   email,
   path,
-  viaGoogle = false,
 }: {
   locale: Locale;
   loungeId?: string;
   email: string;
   path: string;
-  /** Signed in with Google: say "this Gmail account" in the no-access message. */
-  viaGoogle?: boolean;
 }) {
   const dict = await getDictionary(locale);
   const back = loungeId ? localePath(locale, `/pos/${loungeId}`) : localePath(locale);
@@ -40,7 +37,7 @@ export async function ManagersOnly({
         <>
           <h1 className="text-xl font-semibold">{dict.posLogin.noAccessTitle}</h1>
           <p role="alert" className="max-w-md text-base">
-            {viaGoogle ? dict.posLogin.noAccessGmail : dict.posLogin.noAccess}
+            {dict.posLogin.noAccess}
           </p>
           <p className="text-sm text-muted-foreground" dir="auto">
             {format(dict.posLogin.signedInAs, { email })}

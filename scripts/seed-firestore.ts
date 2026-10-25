@@ -14,7 +14,7 @@
  * For a live database use `npm run staff:grant` instead.
  */
 import "dotenv/config";
-import bcrypt from "bcryptjs";
+import { hashPin, PIN_RESET_STATE } from "@/lib/pin";
 import {
   DeviceType,
   LoungeMemberRole,
@@ -28,13 +28,15 @@ import {
 import { db } from "@/server/db";
 import { grantLoungeAccess } from "@/server/services/staff-access";
 
-const DEMO_PASSWORD = "Password123!";
+/** Demo sign-in PINs (PIN is the only sign-in); re-seeding resets them and any PIN lockout. */
+const DEMO_PINS = { admin: "2580", owner: "4826", staff: "1793", player: "3691" } as const;
 
-async function upsertUser(email: string, name: string, role: Role, passwordHash: string) {
+async function upsertUser(email: string, name: string, role: Role, pin: string) {
+  const pinData = { pinHash: await hashPin(pin), pinFailedAttempts: PIN_RESET_STATE.failures, pinLockedUntil: PIN_RESET_STATE.lockedUntil };
   return db.user.upsert({
     where: { email },
-    update: { name, role },
-    create: { email, name, role, passwordHash, emailVerified: new Date() },
+    update: { name, role, ...pinData },
+    create: { email, name, role, emailVerified: new Date(), ...pinData },
   });
 }
 
@@ -373,13 +375,11 @@ async function seedLounge(organizationId: string, seed: LoungeSeed, members: { u
 }
 
 async function main() {
-  const passwordHash = await bcrypt.hash(DEMO_PASSWORD, 12);
-
-  const superAdmin = await upsertUser("admin@gamelounge.dev", "Platform Admin", Role.SUPER_ADMIN, passwordHash);
-  const owner = await upsertUser("owner@gamelounge.dev", "Lounge Owner", Role.LOUNGE_ADMIN, passwordHash);
-  const staff = await upsertUser("staff@gamelounge.dev", "Front Desk", Role.STAFF, passwordHash);
+  const superAdmin = await upsertUser("admin@gamelounge.dev", "Platform Admin", Role.SUPER_ADMIN, DEMO_PINS.admin);
+  const owner = await upsertUser("owner@gamelounge.dev", "Lounge Owner", Role.LOUNGE_ADMIN, DEMO_PINS.owner);
+  const staff = await upsertUser("staff@gamelounge.dev", "Front Desk", Role.STAFF, DEMO_PINS.staff);
   // Super admin too, so one login can book as a player and manage every lounge (POS, devices, menu).
-  const customer = await upsertUser("player@gamelounge.dev", "Demo Player", Role.SUPER_ADMIN, passwordHash);
+  const customer = await upsertUser("player@gamelounge.dev", "Demo Player", Role.SUPER_ADMIN, DEMO_PINS.player);
 
   await db.wallet.upsert({
     where: { userId: customer.id },
@@ -428,9 +428,15 @@ async function main() {
     console.log(`  ${lounge.name.padEnd(18)} /${lounge.slug} · ${seed.city} · ${deviceCount} devices`);
     for (const email of staffEmails) await grantLoungeAccess({ loungeId: lounge.id, actorId: null }, { email, role: "STAFF" });
   }
-  if (staffEmails.length) console.log(`  Gmail cashiers (sign in with Google on /pos/login): ${staffEmails.join(", ")}`);
-  console.log(`  Logins (password "${DEMO_PASSWORD}"):`);
-  for (const u of [superAdmin, owner, staff, customer]) console.log(`    ${u.role.padEnd(12)} ${u.email}`);
+  if (staffEmails.length) console.log(`  Extra cashiers (no PIN yet; set one with staff:grant --pin): ${staffEmails.join(", ")}`);
+  console.log("  PIN sign-in on /pos/login:");
+  const pins = [
+    [superAdmin, DEMO_PINS.admin],
+    [owner, DEMO_PINS.owner],
+    [staff, DEMO_PINS.staff],
+    [customer, DEMO_PINS.player],
+  ] as const;
+  for (const [u, pin] of pins) console.log(`    ${u.role.padEnd(12)} ${(u.name ?? "").padEnd(15)} PIN ${pin}  (${u.email})`);
 }
 
 main()
