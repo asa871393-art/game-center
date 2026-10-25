@@ -1,6 +1,5 @@
 import { Lock, MonitorSmartphone } from "lucide-react";
 import type { Metadata } from "next";
-import Link from "next/link";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { GoogleSignInButton, GoogleSignInUnavailable, SignInForm } from "@/components/auth/auth-forms";
@@ -9,7 +8,6 @@ import { signInErrorMessage } from "@/components/auth/sign-in-errors";
 import { ManagersOnly } from "@/components/pos/managers-only";
 import { PinSignIn } from "@/components/pos/pin-sign-in";
 import { Skeleton } from "@/components/ui/skeleton";
-import { localePath } from "@/i18n/config";
 import { getDictionary, getLocale } from "@/i18n/server";
 import { isGoogleAuthEnabled } from "@/lib/env";
 import { posCallback } from "@/lib/pos-login";
@@ -88,12 +86,6 @@ async function CashierLogin({ searchParams }: Pick<PageProps<"/[locale]/pos/logi
           )
         }
       />
-
-      <p className="text-center text-sm">
-        <Link href={localePath(locale, "/login")} className="text-muted-foreground hover:text-foreground hover:underline">
-          {p.customerLogin}
-        </Link>
-      </p>
     </div>
   );
 }

@@ -1,6 +1,6 @@
 "use client";
 
-import { CalendarCheck, LayoutDashboard, LogOut, MonitorSmartphone, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, LogOut, MonitorSmartphone, ShieldCheck } from "lucide-react";
 import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -41,9 +41,6 @@ export function UserMenu({ user }: { user: MenuUser }) {
           <div className="truncate text-xs text-muted-foreground">{user.email}</div>
         </DropdownMenuLabel>
         <DropdownMenuSeparator />
-        <DropdownMenuItem render={<Link href={href("/account/bookings")} />}>
-          <CalendarCheck /> {dict.nav.myBookings}
-        </DropdownMenuItem>
         {user.role !== "CUSTOMER" && (
           <>
             <DropdownMenuItem render={<Link href={href("/pos")} />}>

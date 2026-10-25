@@ -3,12 +3,12 @@ import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { StaffManager } from "@/components/manage/staff-manager";
 import { Skeleton } from "@/components/ui/skeleton";
-import { localePath } from "@/i18n/config";
 import { getDictionary, getLocale } from "@/i18n/server";
 import { db } from "@/server/db";
 import { listLoungeStaff } from "@/server/services/staff-access";
 import { getSession } from "@/server/session";
 import { getLoungeAccess, hasLoungeRole } from "@/server/staff";
+import { posLoginHref } from "@/lib/pos-login";
 
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDictionary();
@@ -32,7 +32,7 @@ async function Staff({ loungeId }: { loungeId: string }) {
   const [locale, session] = await Promise.all([getLocale(), getSession()]);
   const path = `/manage/${loungeId}/staff`;
   if (!session?.user?.id) {
-    redirect(`${localePath(locale, "/login")}?callbackUrl=${encodeURIComponent(localePath(locale, path))}`);
+    redirect(posLoginHref(locale, path));
   }
   const access = await getLoungeAccess(session.user.id, loungeId);
   // Same response for "no such lounge", "not yours" and "cashier only", so ids can't be probed.

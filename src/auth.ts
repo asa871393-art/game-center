@@ -96,7 +96,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   // Take the host from the request (Netlify's deploy and branch URLs); AUTH_URL / NEXTAUTH_URL override it.
   trustHost: true,
   providers,
-  pages: { signIn: "/ar/login", error: "/ar/login" },
+  pages: { signIn: "/ar/pos/login", error: "/ar/pos/login" },
   callbacks: {
     async jwt({ token, user, account, profile, trigger }) {
       if (user?.id) {

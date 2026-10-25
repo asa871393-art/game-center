@@ -17,6 +17,7 @@ import { cn } from "@/lib/utils";
 import { db } from "@/server/db";
 import { getPlatformOverview, type PlatformOverview } from "@/server/queries/admin";
 import { getSession } from "@/server/session";
+import { posLoginHref } from "@/lib/pos-login";
 
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDictionary();
@@ -45,7 +46,7 @@ const loungeTone: Record<LoungeStatus, string> = {
 async function Overview() {
   const [locale, session] = await Promise.all([getLocale(), getSession()]);
   if (!session?.user?.id) {
-    redirect(`${localePath(locale, "/login")}?callbackUrl=${encodeURIComponent(localePath(locale, "/admin"))}`);
+    redirect(posLoginHref(locale, "/admin"));
   }
   // The JWT role can be stale; the database decides.
   const user = await db.user.findUnique({ where: { id: session.user.id }, select: { role: true, isActive: true } });

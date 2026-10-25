@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { notFound, redirect } from "next/navigation";
 import { Suspense } from "react";
 import { ReceiptToolbar } from "@/components/pos/receipt-toolbar";
-import { localeMeta, localePath, type Locale } from "@/i18n/config";
+import { localeMeta, type Locale } from "@/i18n/config";
 import type { Dictionary } from "@/i18n/dictionaries/ar";
 import { money } from "@/i18n/format";
 import { shiftTypeEmoji } from "@/lib/shift-type";
@@ -10,6 +10,7 @@ import { getDictionary, getLocale } from "@/i18n/server";
 import { getSession } from "@/server/session";
 import { getShiftSummary, type ShiftSummary } from "@/server/services/shift";
 import { getLoungeAccess } from "@/server/staff";
+import { posLoginHref } from "@/lib/pos-login";
 
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDictionary();
@@ -29,7 +30,7 @@ export default function ShiftReportPage({ params }: PageProps<"/[locale]/shift-r
 async function ReportLoader({ id }: { id: string }) {
   const [locale, session] = await Promise.all([getLocale(), getSession()]);
   if (!session?.user?.id) {
-    redirect(`${localePath(locale, "/login")}?callbackUrl=${encodeURIComponent(localePath(locale, `/shift-report/${id}`))}`);
+    redirect(posLoginHref(locale, `/shift-report/${id}`));
   }
   const summary = await getShiftSummary(id);
   // Same 404 for missing and for another lounge's shift.

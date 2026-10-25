@@ -40,6 +40,10 @@ const ar = {
     dashboard: "لوحة التحكم",
     admin: "إدارة المنصة",
     openMenu: "فتح القائمة",
+    posTerminal: "نقطة البيع",
+    manageLounge: "إدارة الصالة",
+    staff: "الموظفون",
+    shiftReports: "تقارير الورديات",
   },
   home: {
     heroTitle: "احجز جلستك القادمة بثوانٍ",

@@ -10,6 +10,7 @@ import { format } from "@/i18n/format";
 import { getDictionary, getLocale } from "@/i18n/server";
 import { getSession } from "@/server/session";
 import { listManagedLounges } from "@/server/staff";
+import { posLoginHref } from "@/lib/pos-login";
 
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDictionary();
@@ -31,7 +32,7 @@ export default async function ManageIndexPage() {
 async function LoungeList() {
   const [locale, session] = await Promise.all([getLocale(), getSession()]);
   if (!session?.user?.id) {
-    redirect(`${localePath(locale, "/login")}?callbackUrl=${encodeURIComponent(localePath(locale, "/manage"))}`);
+    redirect(posLoginHref(locale, "/manage"));
   }
   const [dict, lounges] = await Promise.all([getDictionary(locale), listManagedLounges(session.user.id, session.user.role)]);
   if (lounges.length === 1) redirect(localePath(locale, `/manage/${lounges[0].id}`));

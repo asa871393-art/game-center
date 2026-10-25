@@ -37,6 +37,10 @@ const en: Dictionary = {
     dashboard: "Dashboard",
     admin: "Platform admin",
     openMenu: "Open menu",
+    posTerminal: "POS Terminal",
+    manageLounge: "Lounge Management",
+    staff: "Staff",
+    shiftReports: "Shift Reports",
   },
   home: {
     heroTitle: "Book your next gaming session in seconds",

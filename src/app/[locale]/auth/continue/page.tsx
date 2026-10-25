@@ -4,14 +4,12 @@ import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { localePath } from "@/i18n/config";
 import { getLocale } from "@/i18n/server";
-import { getSession } from "@/server/session";
-import { getPlatformRole, isStaffRole } from "@/server/staff";
 
 export const metadata: Metadata = { robots: { index: false } };
 
 /**
  * Landing step after a sign-in that had no particular destination (the login page's default
- * callback). Lounge staff go straight to the POS; everyone else to the home page. A page rather
+ * callback). Everyone goes to the POS, which shows non-staff accounts that they lack access. A page rather
  * than a route handler so the redirect also works after the client-side navigation a sign-in
  * Server Action ends with.
  */
@@ -27,7 +25,5 @@ export default function ContinuePage() {
 }
 
 async function Continue(): Promise<null> {
-  const [locale, session] = await Promise.all([getLocale(), getSession()]);
-  const role = session?.user?.id ? await getPlatformRole(session.user.id) : null;
-  redirect(role && isStaffRole(role) ? localePath(locale, "/pos") : localePath(locale));
+  redirect(localePath(await getLocale(), "/pos"));
 }

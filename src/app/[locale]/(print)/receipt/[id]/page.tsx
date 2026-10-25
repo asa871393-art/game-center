@@ -11,6 +11,7 @@ import { getReceipt, type Receipt, type ReceiptLine } from "@/server/queries/rec
 import { env } from "@/lib/env";
 import { getSession } from "@/server/session";
 import { getLoungeAccess } from "@/server/staff";
+import { posLoginHref } from "@/lib/pos-login";
 
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDictionary();
@@ -30,7 +31,7 @@ export default function ReceiptPage({ params }: PageProps<"/[locale]/receipt/[id
 async function ReceiptLoader({ id }: { id: string }) {
   const [locale, session] = await Promise.all([getLocale(), getSession()]);
   if (!session?.user?.id) {
-    redirect(`${localePath(locale, "/login")}?callbackUrl=${encodeURIComponent(localePath(locale, `/receipt/${id}`))}`);
+    redirect(posLoginHref(locale, `/receipt/${id}`));
   }
   const receipt = await getReceipt(id);
   // Only staff of that lounge may see its receipts; same 404 for missing and forbidden.

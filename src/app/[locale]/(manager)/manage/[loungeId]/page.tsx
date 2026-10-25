@@ -11,6 +11,7 @@ import { FirebaseAdminNotConfiguredError } from "@/lib/firebase-admin";
 import { getPosBoard } from "@/server/queries/manage";
 import { getSession } from "@/server/session";
 import { getLoungeAccess, hasLoungeRole, type LoungeAccess } from "@/server/staff";
+import { posLoginHref } from "@/lib/pos-login";
 
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDictionary();
@@ -32,7 +33,7 @@ export default function ManageLoungePage({ params }: PageProps<"/[locale]/manage
 async function Board({ loungeId }: { loungeId: string }) {
   const [locale, session] = await Promise.all([getLocale(), getSession()]);
   if (!session?.user?.id) {
-    redirect(`${localePath(locale, "/login")}?callbackUrl=${encodeURIComponent(localePath(locale, `/manage/${loungeId}`))}`);
+    redirect(posLoginHref(locale, `/manage/${loungeId}`));
   }
   const userId = session.user.id;
 
