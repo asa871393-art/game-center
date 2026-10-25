@@ -98,12 +98,24 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   providers,
   pages: { signIn: "/ar/login", error: "/ar/login" },
   callbacks: {
-    async jwt({ token, user, account, trigger }) {
+    async jwt({ token, user, account, profile, trigger }) {
       if (user?.id) {
         token.id = user.id;
         if (account) token.provider = account.provider;
         // OAuth users come from the adapter without our custom fields.
-        token.role = user.role ?? (await db.user.findUnique({ where: { id: user.id }, select: { role: true } }))?.role;
+        const stored = await db.user.findUnique({ where: { id: user.id }, select: { role: true, name: true, image: true } });
+        token.role = user.role ?? stored?.role;
+        // The adapter only copies the Google profile on first sign-in; keep the avatar current after
+        // that and fill a missing name, but keep a name an admin entered (e.g. for pre-registered staff).
+        if (account?.provider === "google" && stored) {
+          const image = typeof profile?.picture === "string" ? profile.picture : null;
+          const name = stored.name ?? profile?.name ?? null;
+          if ((image && image !== stored.image) || name !== stored.name) {
+            await db.user.update({ where: { id: user.id }, data: { ...(image ? { image } : {}), name } });
+          }
+          token.picture = image ?? stored.image;
+          token.name = name;
+        }
       } else if (trigger === "update" && token.id) {
         token.role = (await db.user.findUnique({ where: { id: token.id }, select: { role: true } }))?.role;
       }
