@@ -5,6 +5,7 @@ import { Suspense } from "react";
 import { signInErrorMessage } from "@/components/auth/sign-in-errors";
 import { ManagersOnly } from "@/components/pos/managers-only";
 import { PinSignIn } from "@/components/pos/pin-sign-in";
+import { TerminalEnroll } from "@/components/pos/terminal-enroll";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Skeleton } from "@/components/ui/skeleton";
 import { getDictionary, getLocale } from "@/i18n/server";
@@ -12,6 +13,7 @@ import { posCallback } from "@/lib/pos-login";
 import { getPinLounge } from "@/server/services/pos-pin";
 import { getSession } from "@/server/session";
 import { getPlatformRole, isStaffRole } from "@/server/staff";
+import { isTrustedTerminal } from "@/server/terminal";
 
 export async function generateMetadata(): Promise<Metadata> {
   const dict = await getDictionary();
@@ -51,7 +53,9 @@ async function CashierLogin({ searchParams }: Pick<PageProps<"/[locale]/pos/logi
 
   const error = typeof sp.error === "string" ? signInErrorMessage(sp.error, dict.auth) : undefined;
   const p = dict.posLogin;
-  const lounge = await getPinLounge();
+  // Browsers that haven't entered the branch code see neither the branch nor its staff.
+  const trusted = await isTrustedTerminal();
+  const lounge = trusted ? await getPinLounge() : null;
   return (
     <div className="w-full max-w-md space-y-6 rounded-3xl border bg-card p-6 shadow-lg sm:p-8">
       <div className="space-y-2 text-center">
@@ -70,7 +74,7 @@ async function CashierLogin({ searchParams }: Pick<PageProps<"/[locale]/pos/logi
         </Alert>
       )}
 
-      <PinSignIn lounge={lounge} callbackUrl={callbackUrl} dict={dict} />
+      {trusted ? <PinSignIn lounge={lounge} callbackUrl={callbackUrl} dict={dict} /> : <TerminalEnroll />}
     </div>
   );
 }

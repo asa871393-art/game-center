@@ -290,7 +290,8 @@ without a PIN can't sign in, so give at least one admin a PIN with the CLI befor
 1. Set up the Firebase project as in [Firebase](#firebase), including `npm run firestore:deploy`. A query whose
    composite index is missing fails with a Firestore error containing a link that creates it.
 2. In Netlify → Site configuration → Environment variables set `AUTH_SECRET` (`NEXTAUTH_SECRET` also works), `NEXT_PUBLIC_APP_URL` (your site URL),
-   `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, plus the storage bucket you use.
+   `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, plus the storage bucket you use,
+   and `POS_TERMINAL_CODE` (see [Branch code](#branch-code-recommended-on-a-public-url)).
 3. Give an admin a PIN against the production Firestore (`npm run staff:grant -- you@example.com --role SUPER_ADMIN --pin <digits>`).
 
 Don't run `db:seed` against a production project: it creates `player@gamelounge.dev` as a super admin with a published

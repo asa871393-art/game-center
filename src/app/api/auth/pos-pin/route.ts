@@ -9,6 +9,7 @@ import { posCallback } from "@/lib/pos-login";
 import { signPinTicket } from "@/lib/pin-ticket";
 import { checkStaffPin } from "@/server/services/pos-pin";
 import { getPrimaryLoungeId } from "@/server/staff";
+import { isTrustedTerminal } from "@/server/terminal";
 
 /**
  * POS PIN sign-in: { userId, pin, locale?, callbackUrl? } from the keypad on /pos/login.
@@ -18,7 +19,8 @@ import { getPrimaryLoungeId } from "@/server/staff";
  * 200 { redirectTo }                   signed in (Auth.js session cookie set)
  * 400 { error: "VALIDATION" }          malformed body
  * 401 { error: "INVALID_PIN", attemptsLeft }
- * 403 { error: "NO_TERMINAL" }         no branch to sign in to, or cross-site request
+ * 403 { error: "NO_TERMINAL" }         no branch to sign in to, cross-site request, or a browser
+ *                                      that hasn't entered the branch code (POS_TERMINAL_CODE)
  * 429 { error: "LOCKED", retryAfter }  with a Retry-After header
  */
 
@@ -33,6 +35,8 @@ export async function POST(request: NextRequest) {
   // Browsers send Origin on POST; refuse other sites even though the JSON body already needs CORS.
   const origin = request.headers.get("origin");
   if (origin && origin !== request.nextUrl.origin) return NextResponse.json({ error: "NO_TERMINAL" }, { status: 403 });
+
+  if (!(await isTrustedTerminal())) return NextResponse.json({ error: "NO_TERMINAL" }, { status: 403 });
 
   const loungeId = await getPrimaryLoungeId();
   if (!loungeId) return NextResponse.json({ error: "NO_TERMINAL" }, { status: 403 });

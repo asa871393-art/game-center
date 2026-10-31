@@ -41,3 +41,14 @@ describe("auth secret", () => {
     );
   });
 });
+
+describe("branch code", () => {
+  it("is optional, and must be at least 8 characters when set", async () => {
+    expect((await loadEnv({ AUTH_SECRET: SECRET_A })).env.POS_TERMINAL_CODE).toBeUndefined();
+    process.env.POS_TERMINAL_CODE = "lounge-2026";
+    expect((await loadEnv({ AUTH_SECRET: SECRET_A })).env.POS_TERMINAL_CODE).toBe("lounge-2026");
+    vi.spyOn(console, "error").mockImplementation(() => {});
+    process.env.POS_TERMINAL_CODE = "short";
+    await expect(loadEnv({ AUTH_SECRET: SECRET_A })).rejects.toThrow("Invalid environment variables");
+  });
+});
