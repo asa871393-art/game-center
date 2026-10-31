@@ -8,7 +8,7 @@ import { addMinutes, diffMinutes } from "@/lib/booking/time";
 import { computeBookingTotals, paymentStatusFor } from "@/lib/booking/totals";
 import { applyBps, fromMinor, toMinor, type Minor } from "@/lib/money";
 import { db, type TxClient, type DbReader, type UpdateData } from "@/server/db";
-import { BLOCKING_STATUSES } from "@/server/queries/lounges";
+import { BLOCKING_STATUSES } from "@/lib/db/types";
 import { generateReference, isOverlapViolation, MAX_DURATION_MINUTES, releaseBookings } from "./booking";
 
 /**

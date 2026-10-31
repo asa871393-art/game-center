@@ -1,6 +1,6 @@
 "use client";
 
-import { LayoutDashboard, LogOut, MonitorSmartphone, ShieldCheck } from "lucide-react";
+import { LayoutDashboard, LogOut, MonitorSmartphone } from "lucide-react";
 import Link from "next/link";
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
 import { Button } from "@/components/ui/button";
@@ -50,11 +50,6 @@ export function UserMenu({ user }: { user: MenuUser }) {
               <LayoutDashboard /> {dict.nav.dashboard}
             </DropdownMenuItem>
           </>
-        )}
-        {user.role === "SUPER_ADMIN" && (
-          <DropdownMenuItem render={<Link href={href("/admin")} />}>
-            <ShieldCheck /> {dict.nav.admin}
-          </DropdownMenuItem>
         )}
         <DropdownMenuSeparator />
         <form action={signOutAction}>

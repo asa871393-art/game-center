@@ -1,7 +1,7 @@
 import { isLocale, localePath, type Locale } from "@/i18n/config";
 
 /** Sections the cashier sign-in may return to: the POS, management dashboards and printouts. */
-const STAFF_SECTIONS = new Set(["pos", "manage", "admin", "receipt", "shift-report"]);
+const STAFF_SECTIONS = new Set(["pos", "manage", "receipt", "shift-report"]);
 
 /** The cashier sign-in page, returning to `path` (a locale-less staff path) afterwards. */
 export function posLoginHref(locale: Locale, path = "/pos"): string {
@@ -10,7 +10,7 @@ export function posLoginHref(locale: Locale, path = "/pos"): string {
 
 /**
  * Where to send someone after the cashier sign-in: the requested staff page when it is one,
- * otherwise the POS home. Only same-site /{locale}/{pos|manage|admin|receipt|shift-report} paths
+ * otherwise the POS home. Only same-site /{locale}/{pos|manage|receipt|shift-report} paths
  * are accepted.
  */
 export function posCallback(locale: Locale, raw: unknown): string {

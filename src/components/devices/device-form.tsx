@@ -267,15 +267,6 @@ function DeviceForm({
             ))}
           </div>
           {busy && <p className="text-xs text-amber-300">{d.busyHint}</p>}
-          <label className="flex items-center gap-2 text-sm">
-            <input
-              type="checkbox"
-              className="size-5 accent-[var(--primary)]"
-              checked={form.isBookableOnline}
-              onChange={(e) => set("isBookableOnline", e.target.checked)}
-            />
-            {d.bookableOnline}
-          </label>
         </section>
 
         <section className="space-y-3 rounded-xl border p-3">

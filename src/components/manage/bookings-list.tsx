@@ -1,6 +1,6 @@
 "use client";
 
-import { BookingStatusBadge } from "@/components/booking/status-badge";
+import { BookingStatusBadge } from "@/components/manage/status-badge";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { useI18n } from "@/i18n/client";
 import { formatTime, money } from "@/i18n/format";

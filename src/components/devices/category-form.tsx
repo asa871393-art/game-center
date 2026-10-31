@@ -3,7 +3,7 @@
 import { Loader2, Save } from "lucide-react";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { DEVICE_TYPES, deviceTypeMeta } from "@/components/lounge/device-type";
+import { DEVICE_TYPES, deviceTypeMeta } from "@/components/devices/device-type";
 import { Button } from "@/components/ui/button";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";

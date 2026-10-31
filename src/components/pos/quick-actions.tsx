@@ -24,7 +24,7 @@ import {
   Wrench,
 } from "lucide-react";
 import { useState } from "react";
-import { deviceTypeMeta } from "@/components/lounge/device-type";
+import { deviceTypeMeta } from "@/components/devices/device-type";
 import { cartLines, cartSubtotal, MenuPicker, type Cart } from "@/components/manage/menu-picker";
 import { usePos, usePosAction } from "@/components/manage/pos-context";
 import { formatCountdown } from "@/components/manage/pos-ui";

@@ -109,7 +109,7 @@ afterAll(async () => {
   await db.$disconnect();
 });
 
-/** A confirmed pay-at-lounge online booking for the test customer. */
+/** A confirmed pay-at-lounge reservation for the test customer. */
 async function onlineBooking(deviceCode: string, start: Date, minutes = 60, addOns: { menuItemId: string; quantity: number }[] = []) {
   const { reference } = await createBooking({
     customerId,
@@ -119,8 +119,6 @@ async function onlineBooking(deviceCode: string, start: Date, minutes = 60, addO
     durationMinutes: minutes,
     players: 1,
     addOns,
-    checkoutMethod: "PAY_AT_LOUNGE",
-    locale: "en",
   });
   return db.booking.findUniqueOrThrow({ where: { reference } });
 }
