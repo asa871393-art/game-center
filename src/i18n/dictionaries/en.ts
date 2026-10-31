@@ -622,6 +622,13 @@ const en: Dictionary = {
     noAccess: "This account doesn't have cashier access. Please contact your manager to grant it.",
     signedInAs: "Signed in as {email}",
   },
+  posTerminal: {
+    title: "Register this device",
+    description: "This device isn't registered as a cashier terminal. Enter the branch code once to show the staff and the PIN keypad.",
+    code: "Branch code",
+    submit: "Register device",
+    wrong: "Wrong branch code.",
+  },
   posLock: {
     lock: "Lock screen / Switch staff",
     title: "Screen locked",

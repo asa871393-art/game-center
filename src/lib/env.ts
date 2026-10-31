@@ -1,5 +1,6 @@
 import "server-only";
 import { z } from "zod";
+import { TERMINAL_CODE_MIN_LENGTH } from "./terminal";
 
 /** Unset, empty or blank all mean "not configured" (.env.example ships empty placeholders). */
 const optionalString = z
@@ -23,6 +24,11 @@ const envSchema = z.object({
   FIREBASE_PRIVATE_KEY: optionalString,
   /** The one branch this deployment runs (a lounge id). Unset: the oldest lounge. */
   PRIMARY_LOUNGE_ID: optionalString,
+  /**
+   * Branch code: when set, only browsers that entered it once (a long-lived cookie) see the staff
+   * list and can sign in by PIN. Unset: any browser can, which suits a POS reachable only in the lounge.
+   */
+  POS_TERMINAL_CODE: optionalString,
 });
 
 const MIN_SECRET_LENGTH = 32;
@@ -37,6 +43,13 @@ const parsed = envSchema
         code: "custom",
         path: ["AUTH_SECRET"],
         message: `Set AUTH_SECRET (or NEXTAUTH_SECRET) to a random string of at least ${MIN_SECRET_LENGTH} characters: npx auth secret, or openssl rand -base64 32`,
+      });
+    }
+    if (e.POS_TERMINAL_CODE && e.POS_TERMINAL_CODE.length < TERMINAL_CODE_MIN_LENGTH) {
+      ctx.addIssue({
+        code: "custom",
+        path: ["POS_TERMINAL_CODE"],
+        message: `POS_TERMINAL_CODE must be at least ${TERMINAL_CODE_MIN_LENGTH} characters (or unset to turn the branch code off)`,
       });
     }
   })
