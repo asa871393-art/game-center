@@ -191,8 +191,6 @@ describe("devices", () => {
       durationMinutes: 60,
       players: 1,
       addOns: [],
-      checkoutMethod: "PAY_AT_LOUNGE",
-      locale: "en",
     });
     await expectCode(removeDevice(ctxAt(at(18)), spare.id), "HAS_UPCOMING_BOOKINGS");
     const booking = await db.booking.findUniqueOrThrow({ where: { reference } });

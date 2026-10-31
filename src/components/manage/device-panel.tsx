@@ -3,7 +3,7 @@
 import { Ban, Clock, LogIn, Play, Plus, Power, ReceiptText, ShoppingBag, UserX, Wrench, X } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { deviceTypeMeta } from "@/components/lounge/device-type";
+import { deviceTypeMeta } from "@/components/devices/device-type";
 import { useDevicePricing, useLiveBill } from "@/components/pos/use-live-bill";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";

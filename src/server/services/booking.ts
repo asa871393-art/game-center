@@ -1,15 +1,10 @@
 import "server-only";
 import { randomInt } from "node:crypto";
-import type { CheckoutMethod } from "@/lib/db/types";
-import type { Locale } from "@/i18n/config";
-import { localePath } from "@/i18n/config";
 import { PRICING_STEP_MINUTES, quoteBooking, type PricingRuleInput } from "@/lib/booking/pricing";
 import { findContainingWindow } from "@/lib/booking/schedule";
 import { addMinutes, diffMinutes } from "@/lib/booking/time";
-import { env } from "@/lib/env";
 import { fromMinor, toMinor } from "@/lib/money";
 import { db, isDbError, type TxClient } from "@/server/db";
-import { getPaymentProvider, isOnlineMethod } from "@/server/payments";
 
 export const MAX_ADVANCE_DAYS = 14;
 export const MAX_DURATION_MINUTES = 12 * 60;
@@ -24,8 +19,7 @@ export type BookingErrorCode =
   | "TOO_FAR"
   | "OUTSIDE_HOURS"
   | "SLOT_TAKEN"
-  | "ITEM_UNAVAILABLE"
-  | "PAYMENT_UNAVAILABLE";
+  | "ITEM_UNAVAILABLE";
 
 export class BookingError extends Error {
   constructor(public readonly code: BookingErrorCode) {
@@ -42,16 +36,12 @@ export interface CreateBookingInput {
   durationMinutes: number;
   players: number;
   addOns: { menuItemId: string; quantity: number }[];
-  checkoutMethod: CheckoutMethod;
   notes?: string;
-  locale: Locale;
   now?: Date;
 }
 
 export interface CreateBookingResult {
   reference: string;
-  /** Payment page for online methods, confirmation page otherwise. */
-  redirectUrl: string;
 }
 
 // Unambiguous characters for references read aloud at the front desk.
@@ -76,7 +66,7 @@ function mergeAddOns(addOns: CreateBookingInput["addOns"]) {
 
 /**
  * Cancels bookings, their pre-orders and pending payments, and restocks
- * tracked menu items. Used for expired payment holds and declined payments.
+ * tracked menu items. Used for no-shows, staff cancellations and expired holds.
  */
 export async function releaseBookings(
   tx: TxClient,
@@ -107,6 +97,10 @@ export async function releaseBookings(
   });
 }
 
+/**
+ * Reserves a device for a future slot, paid at the lounge. The POS checks these
+ * bookings in, marks no-shows and cancels them; nothing in the UI creates one yet.
+ */
 export async function createBooking(input: CreateBookingInput): Promise<CreateBookingResult> {
   const now = input.now ?? new Date();
 
@@ -179,16 +173,11 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
     addOns: lines,
   });
 
-  const online = isOnlineMethod(input.checkoutMethod);
-  const provider = online ? getPaymentProvider(input.checkoutMethod as "ZAINCASH" | "FASTPAY") : null;
-  if (online && !provider) throw new BookingError("PAYMENT_UNAVAILABLE");
-
   const reference = generateReference();
   const canteenTaxTotal = Math.round((quote.taxTotal * quote.canteenSubtotal) / Math.max(1, quote.playSubtotal + quote.canteenSubtotal));
 
-  let created: { bookingId: string; transactionId: string | null };
   try {
-    created = await db.$transaction(async (tx) => {
+    await db.$transaction(async (tx) => {
       // Free this device's expired payment holds so they don't trip the overlap constraint.
       const expired = await tx.booking.findMany({
         where: { deviceId: device.id, status: "PENDING", expiresAt: { lte: now } },
@@ -210,16 +199,16 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
         if (res.count !== 1) throw new BookingError("ITEM_UNAVAILABLE");
       }
 
-      const booking = await tx.booking.create({
+      await tx.booking.create({
         data: {
           reference,
           loungeId: lounge.id,
           deviceId: device.id,
           customerId: input.customerId,
           source: "ONLINE",
-          status: online ? "PENDING" : "CONFIRMED",
-          checkoutMethod: input.checkoutMethod,
-          expiresAt: online ? addMinutes(now, env.PAYMENT_HOLD_MINUTES) : null,
+          status: "CONFIRMED",
+          checkoutMethod: "PAY_AT_LOUNGE",
+          expiresAt: null,
           players: input.players,
           scheduledStart: start,
           scheduledEnd: end,
@@ -256,104 +245,11 @@ export async function createBooking(input: CreateBookingInput): Promise<CreateBo
         },
         select: { id: true },
       });
-
-      const transaction =
-        online && provider
-          ? await tx.transaction.create({
-              data: {
-                loungeId: lounge.id,
-                bookingId: booking.id,
-                userId: input.customerId,
-                type: "PAYMENT",
-                method: "ONLINE",
-                status: "PENDING",
-                amount: fromMinor(quote.total),
-                currency: lounge.currency,
-                provider: provider.name,
-              },
-              select: { id: true },
-            })
-          : null;
-
-      return { bookingId: booking.id, transactionId: transaction?.id ?? null };
     });
   } catch (error) {
     if (isOverlapViolation(error)) throw new BookingError("SLOT_TAKEN");
     throw error;
   }
 
-  if (!provider || !created.transactionId) {
-    return { reference, redirectUrl: localePath(input.locale, `/bookings/${reference}`) };
-  }
-
-  try {
-    const payment = await provider.createPayment({
-      transactionId: created.transactionId,
-      amount: quote.total,
-      currency: lounge.currency,
-      description: `${lounge.name} · ${device.name} · ${reference}`,
-      locale: input.locale,
-    });
-    await db.transaction.update({ where: { id: created.transactionId }, data: { providerRef: payment.providerRef } });
-    return { reference, redirectUrl: payment.redirectUrl };
-  } catch (error) {
-    // The gateway failed: release the hold rather than leave a dead booking.
-    await db.$transaction((tx) => releaseBookings(tx, [created.bookingId], "PAYMENT_INIT_FAILED"));
-    console.error("Payment init failed", error);
-    throw new BookingError("PAYMENT_UNAVAILABLE");
-  }
-}
-
-export type SettleOutcome = "approved" | "declined";
-export type SettleResult = "PAID" | "DECLINED" | "EXPIRED" | "ALREADY_PROCESSED";
-
-/**
- * Applies a verified gateway result to a pending online payment. Idempotent:
- * only the first call for a PENDING transaction has an effect.
- */
-export async function settlePayment(
-  transactionId: string,
-  outcome: SettleOutcome,
-  now = new Date(),
-): Promise<{ result: SettleResult; reference: string }> {
-  return db.$transaction(async (tx) => {
-    const payment = await tx.transaction.findUnique({
-      where: { id: transactionId },
-      include: { booking: { select: { id: true, reference: true, status: true, expiresAt: true, totalPrice: true } } },
-    });
-    if (!payment?.booking) throw new BookingError("NOT_FOUND");
-    const { booking } = payment;
-
-    // Claim the transaction; a concurrent call sees count 0 and backs off.
-    const claimed = await tx.transaction.updateMany({
-      where: { id: payment.id, status: "PENDING" },
-      data: { status: outcome === "approved" ? "SUCCEEDED" : "FAILED" },
-    });
-    if (claimed.count === 0 || booking.status !== "PENDING") {
-      return { result: "ALREADY_PROCESSED", reference: booking.reference };
-    }
-
-    if (booking.expiresAt && booking.expiresAt <= now) {
-      await tx.transaction.update({ where: { id: payment.id }, data: { status: "FAILED", metadata: { reason: "EXPIRED" } } });
-      await releaseBookings(tx, [booking.id], "PAYMENT_EXPIRED", now);
-      return { result: "EXPIRED", reference: booking.reference };
-    }
-
-    if (outcome === "declined") {
-      await releaseBookings(tx, [booking.id], "PAYMENT_DECLINED", now);
-      return { result: "DECLINED", reference: booking.reference };
-    }
-
-    await tx.booking.update({
-      where: { id: booking.id },
-      data: {
-        status: "CONFIRMED",
-        paymentStatus: "PAID",
-        amountPaid: booking.totalPrice,
-        expiresAt: null,
-        version: { increment: 1 },
-      },
-    });
-    return { result: "PAID", reference: booking.reference };
-  });
+  return { reference };
 }

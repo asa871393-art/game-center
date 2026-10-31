@@ -21,13 +21,6 @@ const envSchema = z.object({
   NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET: optionalString,
   FIREBASE_CLIENT_EMAIL: optionalString,
   FIREBASE_PRIVATE_KEY: optionalString,
-  /**
-   * "mock" routes ZainCash/FastPay through the in-app sandbox gateway.
-   * "disabled" hides online payment methods. Real providers plug in later.
-   */
-  PAYMENTS_MODE: z.enum(["mock", "disabled"]).default("mock"),
-  /** Minutes an unpaid online booking holds its slot. */
-  PAYMENT_HOLD_MINUTES: z.coerce.number().int().min(5).max(60).default(15),
   /** The one branch this deployment runs (a lounge id). Unset: the oldest lounge. */
   PRIMARY_LOUNGE_ID: optionalString,
 });

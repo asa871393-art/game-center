@@ -3,7 +3,7 @@ import { isIP } from "node:net";
 import type { DeviceType, InputJsonValue } from "@/lib/db/types";
 import { fromMinor, toMinor, type Minor } from "@/lib/money";
 import { db, type TxClient, type DbReader } from "@/server/db";
-import { BLOCKING_STATUSES } from "@/server/queries/lounges";
+import { BLOCKING_STATUSES } from "@/lib/db/types";
 import { PosError, splitOpenSegmentsOnDevice, type PosContext } from "./pos";
 
 /**

@@ -1,11 +1,14 @@
-# الاساس (Al-Asas) — Gaming Lounge Booking & Management
+# الاساس (Al-Asas) — Gaming Lounge Cashier POS
 
-Multi-tenant platform for gaming lounges (PC arenas, PlayStation, VR, VIP rooms):
-customer booking, lounge POS/floor plan, and super-admin tenant management.
+Cashier point of sale for a single gaming lounge branch (PC arenas, PlayStation, VR, VIP rooms): sessions on the
+device floor, canteen sales, shifts and the cash drawer, device and menu management, and staff with PIN sign-in.
 Arabic (RTL) is the default language; English is included.
 
+Customer-facing booking, online payments and the multi-branch platform admin were removed on 2026-10-31. They are in
+the git history up to commit `6f55a61` if they are ever needed again.
+
 **Stack:** Next.js 16 (App Router, Cache Components) · TypeScript · Tailwind v4 · shadcn/ui (Base UI, RTL) ·
-Firebase Firestore (Admin SDK) · Zustand · Auth.js v5 · Vitest
+Firebase Firestore (Admin SDK) · Auth.js v5 · Vitest
 
 ## Getting started
 
@@ -34,28 +37,20 @@ between runs; seed again after restarting it.
 | Script | Purpose |
 | --- | --- |
 | `test` | Unit tests (pricing, timezones, opening hours, business day, bill totals, money) |
-| `test:integration` | Starts the Firestore emulator, seeds it, runs the booking, payment, POS, realtime and data-layer suites |
+| `test:integration` | Starts the Firestore emulator, seeds it, runs the POS, devices, menu, staff, realtime and data-layer suites |
 | `typecheck` / `lint` / `build` | Static checks and production build (no Firebase credentials needed) |
 | `db:emulator` | Local Firestore emulator (port 8085) |
 | `db:seed` | Demo data into the configured project, or the emulator when `FIRESTORE_EMULATOR_HOST` is set (`SEED_STAFF_EMAILS` adds cashiers without a PIN) |
 | `staff:grant` | Gives an account cashier/manager/super-admin access and its PIN: `npm run staff:grant -- ali@example.com [--lounge <slug>] [--role MANAGER\|SUPER_ADMIN] [--pin 4821]`, or `-- --list` |
 | `firestore:deploy` | Deploys `firestore.rules` and `firestore.indexes.json` (`firebase login` first) |
 
+GitHub Actions (`.github/workflows/ci.yml`) runs typecheck, lint, unit tests and the build, plus the integration
+suite on the emulator, on every pull request and on pushes to `main`.
+
 Integration tests never touch a real project: they refuse to start without `FIRESTORE_EMULATOR_HOST` and drop the
 service-account variables. The emulator needs a Java 21+ runtime on `PATH`.
 
-## Customer features (Phase 2)
-
-- **Landing** (`/[locale]`): search by name, city and device type; device-type shortcuts; featured lounges.
-- **Search** (`/[locale]/lounges?q=&city=&type=`).
-- **Lounge page** (`/[locale]/lounges/[slug]`): interactive floor plan (map + list view), pricing, opening hours.
-- **Booking dialog**: 14-day date strip → free start times for that device → duration and players →
-  snacks/drinks pre-order → payment method and notes. The price preview uses the same pricing code as the server.
-- **Checkout**: *Pay at the lounge* (confirmed immediately, unpaid) or *ZainCash / FastPay* (sandbox, see below).
-- **Confirmation** (`/[locale]/bookings/[reference]`) and **My bookings** (`/[locale]/account/bookings`).
-- **Auth**: PIN sign-in only, on `/[locale]/pos/login`.
-
-## Lounge dashboard & POS (Phase 3)
+## Lounge dashboard
 
 Sign in as `staff@` or `owner@` and open **Dashboard** from the user menu (`/[locale]/manage`). With one lounge you go
 straight to its board (`/[locale]/manage/[loungeId]`); super admins see every lounge.
@@ -116,8 +111,8 @@ a lounge.
   and VIP 2×, and VIP rooms at Multi 1.5×.
 - Checkout freezes an open session's bill at the moment checkout opened (`billUntil`, at most 10 minutes old), so the
   amount shown is the amount charged. Payments must add up exactly to the balance due.
-- An open session holds its seat until the next booking or closing time, so online customers can't book that device
-  meanwhile. At checkout the hold shrinks to the actual end.
+- An open session holds its seat until the next booking or closing time. At checkout the hold shrinks to the actual
+  end.
 - **ZainCash at the counter** is recorded as `PaymentMethod.ZAINCASH`. It isn't connected to a ZainCash API; the cashier
   confirms the transfer.
 
@@ -140,18 +135,17 @@ a lounge.
   Z-report.
 
 **Discounts** are entered at checkout as an amount or a percentage (5–50% presets) and applied before tax. They're
-audited and show on the receipt and the shift report. A discount can't push the total below what was already paid
-online.
+audited and show on the receipt and the shift report. A discount can't push the total below what was already paid.
 
 **Walk-in canteen sales** use a side panel docked beside the device grid (it overlays the grid on tablets): tap items,
 split payment, print a receipt. The menu includes a **hookah** category.
 
-**Device management** (`/[locale]/pos/[loungeId]/devices`, managers and owners; linked from the POS top bar, the
-dashboard and `/admin`):
+**Device management** (`/[locale]/pos/[loungeId]/devices`, managers and owners; linked from the POS top bar and the
+dashboard):
 - **Devices** grouped by category, showing status, effective Single / Multi / VIP rates, specs, IP/MAC and zone.
   Quick actions are Edit, Change status (Active / Maintenance / Out of order) and Delete.
 - **Add / edit form:**
-  - Basics: name/number, code (derived from the name if empty), category, zone, status, bookable online.
+  - Basics: name/number, code (derived from the name if empty), category, zone, status.
   - Rates: optional per-device Single / Multi / VIP rates; empty means inherit the category.
   - Hardware: specs description, IP (IPv4/IPv6) and MAC (normalized), for future remote control and locking.
   - Floor-map position: automatic in the first free spot if left empty.
@@ -160,12 +154,12 @@ dashboard and `/admin`):
   and the confirmation dialog shows why.
 - **Categories:** add or edit name, type, default Single / Multi / VIP hourly rates, max players, minimum booking,
   start-time interval, and active flag. Only empty categories can be deleted; deactivate the others.
-- **Pricing:** a device's rate overrides its category's everywhere: online booking, POS start, extend, tier change,
+- **Pricing:** a device's rate overrides its category's everywhere: POS start, extend, tier change,
   transfer and live bills. Time-of-day rules still apply on top. Changing a rate while an open session is running bills
   the time so far at the old rate and the rest at the new one.
 
 **Canteen menu management** (`/[locale]/pos/[loungeId]/menu`, managers and owners; linked from the POS top bar,
-Device Management, the dashboard and `/admin`):
+Device Management and the dashboard):
 - **Sections** (`MenuCategory`): each lounge defines its own, e.g. "مشروبات باردة / Cold drinks", with Arabic and
   English names, a broad type (drink, snack, meal, dessert, hookah, other) for icons and reports, and a position.
   Only empty sections can be deleted.
@@ -181,8 +175,7 @@ Device Management, the dashboard and `/admin`):
   - Availability toggle.
   - Saving is refused if POS sales changed the stock since the form was opened, so counts are never overwritten.
 - **Adjust stock** adds deliveries or writes off damaged stock relative to the live count.
-- **Delete:** a never-sold item is deleted; one with order history is **archived** (hidden from the POS and booking
-  site, order lines kept for sales reports) and can be restored.
+- **Delete:** a never-sold item is deleted; one with order history is **archived** (hidden from the POS, order lines kept for sales reports) and can be restored.
 - **Live on the POS:** a database trigger announces menu changes, so price, availability, stock and new items show
   up on open POS screens immediately.
 
@@ -192,7 +185,7 @@ method, cash given and change. While a session is still running it prints as a *
 through a hidden iframe without leaving the screen; `?print=1` opens the print dialog on its own. Only staff of that
 lounge can open a receipt.
 
-## Realtime (Phase 4)
+## Realtime
 
 ```
 Booking / Device / CanteenOrder / Shift / ShiftExpense / MenuItem / MenuCategory committed
@@ -203,9 +196,7 @@ Booking / Device / CanteenOrder / Shift / ShiftExpense / MenuItem / MenuCategory
 ```
 
 - **Staff feed** `GET /api/manage/[loungeId]/events`: lounge members only. Carries the table, operation, row id and
-  status, and shows a toast when an online booking arrives.
-- **Public feed** `GET /api/lounges/[slug]/events`: carries only `{scope: "availability"}`, never booking details. The
-  lounge page uses it to refresh device statuses and the open booking dialog's free slots.
+  status.
 - **Delivery:** events are written in the same transaction as the change, so rolled-back writes are never
   announced, and no-op updates are skipped. Every instance listens, so it works with several instances. Event docs
   carry an `expireAt` (1 day) with a TTL policy in `firestore.indexes.json`, so the collection stays small.
@@ -215,13 +206,6 @@ Booking / Device / CanteenOrder / Shift / ShiftExpense / MenuItem / MenuCategory
   and every 2 min as a safety net when they're up.
 - **Hosting:** each open board holds one HTTP connection. Behind nginx, `X-Accel-Buffering: no` is already set. On
   serverless hosts (Netlify) a stream lasts at most as long as the function, then EventSource reconnects.
-
-## Platform admin
-
-`/[locale]/admin` (super admins only, checked against the database) covers the last 30 days per organization and lounge:
-revenue (payments minus refunds), online payments, platform commission (online payments × the organization's rate),
-bookings, live sessions, devices and subscription. Each lounge can be **suspended** or **reactivated**, which is
-audited. A suspended lounge drops out of search and stops taking online bookings, and its staff board keeps working.
 
 ## Localization
 
@@ -241,23 +225,6 @@ cookie (set by the language switcher), falling back to Arabic.
 
 **RTL rules:** use logical classes (`ms-`, `pe-`, `start-`, `text-start`); shadcn is configured with `"rtl": true`.
 The floor plan is always rendered `dir="ltr"` because a physical room must not be mirrored.
-
-## Payments
-
-`src/server/payments/` defines a `PaymentProvider` interface. With `PAYMENTS_MODE=mock` (the default), ZainCash and
-FastPay use an in-app **sandbox gateway** (`/[locale]/checkout/[transactionId]`) where you simulate approval or decline.
-No real money is involved, and the UI labels these methods as sandbox.
-
-Online bookings are created `PENDING` with a slot hold (`PAYMENT_HOLD_MINUTES`, default 15).
-- **approved** → `CONFIRMED`, `PAID`
-- **declined** → `CANCELLED`, pre-order restocked, slot freed
-- **expired** → released automatically the next time someone books that device. Pages already show it as cancelled.
-
-Settlement is idempotent: only the first result for a pending transaction counts.
-
-**Going live:** implement `PaymentProvider` for each wallet: create the payment with merchant credentials, return the
-hosted URL, and verify the signed callback in a route handler before calling `settlePayment()`. Return it from
-`getPaymentProvider()`. Set `PAYMENTS_MODE=disabled` to offer pay-at-lounge only.
 
 ## Firebase
 
@@ -336,15 +303,14 @@ scripts/                   seed-firestore.ts (demo data), firestore-indexes.mjs 
 firestore.rules           client-access rules; firebase.json, firestore.indexes.json
 src/proxy.ts               locale redirect
 src/auth.ts                Auth.js config (PIN credentials only, JWT sessions with role and branch)
-src/app/[locale]/          root layout (lang/dir), (customer) pages, (manager), (admin)
-src/app/api/               auth handlers, lounge availability, live event streams (SSE)
-src/components/            ui/ (shadcn), site/, search/, lounge/, booking/, auth/, manage/ (POS board)
+src/app/[locale]/          root layout (lang/dir), (pos), (manager), (print)
+src/app/api/               auth handlers (PIN), live event stream (SSE)
+src/components/            ui/ (shadcn), site/, auth/, pos/ (cashier terminal), manage/ (dashboard), devices/, menu/
 src/lib/db/                model types and enums (types.ts), Decimal (shared with Client Components)
 src/lib/booking/           pure, unit-tested: time.ts, schedule.ts (hours, slots, business day), pricing.ts, totals.ts
-src/server/                db/ (Firestore data layer), queries/, services/ (booking.ts, pos.ts), actions/, payments/,
-                           session.ts, staff.ts, auth-adapter.ts, realtime.ts (Firestore listener hub), sse.ts
+src/server/                db/ (Firestore data layer), queries/, services/ (pos.ts, shift.ts, booking.ts), actions/,
+                           session.ts, staff.ts, realtime.ts (Firestore listener hub), sse.ts
 src/hooks/                 use-live-events.ts (EventSource + debounced refresh)
-src/stores/                Zustand booking draft
 ```
 
 ## Data model notes

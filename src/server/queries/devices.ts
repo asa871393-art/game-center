@@ -1,7 +1,7 @@
 import "server-only";
 import { applyBps, toMinor } from "@/lib/money";
 import { db } from "@/server/db";
-import { BLOCKING_STATUSES } from "./lounges";
+import { BLOCKING_STATUSES } from "@/lib/db/types";
 
 /** Absolute hourly rate of a tier from a single rate and a multiplier; null when the tier isn't offered. */
 function tierRate(single: number, bps: number | null) {

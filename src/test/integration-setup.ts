@@ -11,4 +11,3 @@ delete process.env.FIREBASE_CLIENT_EMAIL;
 delete process.env.FIREBASE_PRIVATE_KEY;
 process.env.NEXT_PUBLIC_FIREBASE_PROJECT_ID = "demo-gaming-lounge";
 process.env.AUTH_SECRET ??= "integration-test-secret-integration-test-secret";
-process.env.PAYMENTS_MODE = "mock";

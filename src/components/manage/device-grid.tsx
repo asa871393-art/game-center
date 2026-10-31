@@ -1,6 +1,6 @@
 "use client";
 
-import { deviceTypeMeta } from "@/components/lounge/device-type";
+import { deviceTypeMeta } from "@/components/devices/device-type";
 import { useI18n } from "@/i18n/client";
 import { formatTime } from "@/i18n/format";
 import { cn } from "@/lib/utils";

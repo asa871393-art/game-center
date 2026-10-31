@@ -3,8 +3,7 @@
 import { ClipboardList, History, LayoutDashboard, Lock, Settings2, ShoppingCart, Users, UtensilsCrossed } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useState } from "react";
-import { toast } from "sonner";
-import { DEVICE_TYPES, deviceTypeMeta } from "@/components/lounge/device-type";
+import { DEVICE_TYPES, deviceTypeMeta } from "@/components/devices/device-type";
 import { CanteenPanel } from "@/components/manage/canteen-panel";
 import { PosProvider, useAutoRefresh, useNow, usePos } from "@/components/manage/pos-context";
 import { LocaleSwitcher } from "@/components/site/locale-switcher";
@@ -57,10 +56,7 @@ function Terminal({ cashierName }: { cashierName: string }) {
   const now = useNow(data.generatedAt);
   const refresh = useDebouncedRefresh();
   const live = useLiveEvents<FeedEvent>(`/api/manage/${data.lounge.id}/events`, {
-    onChange: (e) => {
-      refresh();
-      if (e.table === "Booking" && e.op === "INSERT" && e.source === "ONLINE") toast.info(dict.manage.newOnlineBooking);
-    },
+    onChange: refresh,
     onResync: refresh,
   });
   useAutoRefresh(live === "live" ? 120_000 : 15_000);

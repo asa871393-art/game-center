@@ -1,7 +1,7 @@
 "use client";
 
 import { Pause } from "lucide-react";
-import { deviceTypeMeta } from "@/components/lounge/device-type";
+import { deviceTypeMeta } from "@/components/devices/device-type";
 import { usePos } from "@/components/manage/pos-context";
 import { formatCountdown } from "@/components/manage/pos-ui";
 import { useI18n } from "@/i18n/client";

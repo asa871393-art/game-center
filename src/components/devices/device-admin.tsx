@@ -17,7 +17,7 @@ import {
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
-import { deviceTypeMeta } from "@/components/lounge/device-type";
+import { deviceTypeMeta } from "@/components/devices/device-type";
 import { posStatusTone } from "@/components/manage/pos-ui";
 import { Badge } from "@/components/ui/badge";
 import { Button, buttonVariants } from "@/components/ui/button";
@@ -229,7 +229,6 @@ function DeviceRow({
           <div className="flex flex-wrap gap-1 pt-0.5">
             <Badge className={cn("border-0", posStatusTone[device.status])}>{dict.deviceStatus[device.status]}</Badge>
             {ownRate && <Badge variant="outline">{d.ownRateBadge}</Badge>}
-            {!device.isBookableOnline && <Badge variant="outline">{d.notOnline}</Badge>}
             {zone && <Badge variant="secondary">{zone.name}</Badge>}
             {device.usage.upcoming > 0 && (
               <Badge className="border-0 bg-amber-500/15 text-amber-200">{t(d.upcomingCount, { count: device.usage.upcoming })}</Badge>

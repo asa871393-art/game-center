@@ -81,6 +81,9 @@ export const BookingStatus = {
 } as const;
 export type BookingStatus = (typeof BookingStatus)[keyof typeof BookingStatus];
 
+/** Booking statuses that occupy a device (mirrors the overlap constraint). */
+export const BLOCKING_STATUSES = ["PENDING", "CONFIRMED", "ACTIVE"] as const satisfies readonly BookingStatus[];
+
 export const SessionMode = {
   FIXED: "FIXED",
   OPEN: "OPEN",

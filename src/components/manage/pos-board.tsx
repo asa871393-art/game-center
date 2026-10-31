@@ -3,7 +3,6 @@
 import { Activity, CalendarClock, CheckCircle2, Coffee, Settings2, Users, UtensilsCrossed, Wallet } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
-import { toast } from "sonner";
 import { Badge } from "@/components/ui/badge";
 import { buttonVariants } from "@/components/ui/button";
 import { Sheet, SheetContent } from "@/components/ui/sheet";
@@ -34,10 +33,7 @@ function Board() {
   const now = useNow(data.generatedAt);
   const refresh = useDebouncedRefresh();
   const live = useLiveEvents<BoardEvent>(`/api/manage/${data.lounge.id}/events`, {
-    onChange: (e) => {
-      refresh();
-      if (e.table === "Booking" && e.op === "INSERT" && e.source === "ONLINE") toast.info(dict.manage.newOnlineBooking);
-    },
+    onChange: refresh,
     onResync: refresh,
   });
   // Polling is only a safety net while the live feed is up.
