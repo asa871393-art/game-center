@@ -187,6 +187,20 @@
       ]
     },
     {
+      "collectionGroup": "shiftExpenses",
+      "queryScope": "COLLECTION",
+      "fields": [
+        {
+          "fieldPath": "loungeId",
+          "order": "ASCENDING"
+        },
+        {
+          "fieldPath": "createdAt",
+          "order": "ASCENDING"
+        }
+      ]
+    },
+    {
       "collectionGroup": "transactions",
       "queryScope": "COLLECTION",
       "fields": [

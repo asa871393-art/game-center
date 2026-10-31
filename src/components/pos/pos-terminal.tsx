@@ -1,6 +1,6 @@
 "use client";
 
-import { ClipboardList, History, LayoutDashboard, Lock, Settings2, ShoppingCart, Users, UtensilsCrossed } from "lucide-react";
+import { ChartColumn, ClipboardList, History, LayoutDashboard, Lock, Settings2, ShoppingCart, Users, UtensilsCrossed } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useState } from "react";
 import { DEVICE_TYPES, deviceTypeMeta } from "@/components/devices/device-type";
@@ -140,6 +140,16 @@ function Terminal({ cashierName }: { cashierName: string }) {
             >
               <History aria-hidden />
               <span className="sr-only">{dict.shift.history.title}</span>
+            </Link>
+          )}
+          {canManageDevices && (
+            <Link
+              href={href(`/pos/${data.lounge.id}/reports`)}
+              className={buttonVariants({ variant: "ghost", size: "icon-lg" })}
+              title={dict.reports.title}
+            >
+              <ChartColumn aria-hidden />
+              <span className="sr-only">{dict.reports.title}</span>
             </Link>
           )}
           {canManageDevices && (

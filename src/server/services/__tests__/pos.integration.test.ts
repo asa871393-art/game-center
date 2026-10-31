@@ -7,7 +7,9 @@ import { pricePlay } from "@/lib/booking/session-billing";
 import { getReceipt } from "@/server/queries/receipt";
 import { getLoungeAccess, hasLoungeRole } from "@/server/staff";
 import { createBooking } from "../booking";
+import { getMonthReport } from "@/server/queries/reports";
 import { getShiftHistory } from "@/server/queries/shifts";
+import { monthOf } from "@/lib/reports";
 import { addShiftExpense, closeShift, getShiftSummary, openShift, shiftCashNet, voidShiftExpense } from "../shift";
 import {
   addSessionOrder,
@@ -603,6 +605,23 @@ describe("cashier shift and cash drawer", () => {
       ["Ice", ice, false],
       ["typo", 50_000, true],
     ]);
+  });
+
+  it("adds up the month's revenue by day, method, gaming and canteen", async () => {
+    const summary = (await getShiftSummary(shiftId))!;
+    // Payments are stamped with the real time; this suite's expenses with its scenario day.
+    const data = (await getMonthReport(loungeId))!;
+    const { totals } = data.report;
+    expect(totals.collected).toBe(summary.totalCollected);
+    expect(totals.net).toBe(totals.collected - totals.refunds);
+    expect(totals.gaming + totals.canteen).toBe(totals.net);
+    expect(totals.sessions).toBe(summary.sessions);
+    expect(totals.counterSales).toBe(summary.counterSales);
+    for (const m of summary.byMethod) expect(totals.byMethod[m.method]).toBe(m.amount);
+    expect(data.report.days.find((d) => d.date === data.today)!.collected).toBe(summary.totalCollected);
+
+    const scenario = (await getMonthReport(loungeId, monthOf(day)))!;
+    expect(scenario.report.days.find((d) => d.date === day)!.expenses).toBe(summary.expensesTotal);
   });
 
   it("closes with the counted cash and records the variance", async () => {
