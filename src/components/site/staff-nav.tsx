@@ -1,13 +1,13 @@
 "use client";
 
-import { ClipboardList, LayoutDashboard, MonitorSmartphone, Users } from "lucide-react";
+import { ChartColumn, ClipboardList, LayoutDashboard, MonitorSmartphone, Users } from "lucide-react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { buttonVariants } from "@/components/ui/button";
 import { useI18n } from "@/i18n/client";
 import { cn } from "@/lib/utils";
 
-/** Staff navigation for the single branch: POS terminal, lounge management, staff and shift reports. */
+/** Staff navigation for the single branch: POS terminal, lounge management, staff, shift and revenue reports. */
 export function StaffNav({ loungeId }: { loungeId: string }) {
   const { dict, href } = useI18n();
   const pathname = usePathname();
@@ -17,6 +17,7 @@ export function StaffNav({ loungeId }: { loungeId: string }) {
     { path: `/manage/${loungeId}`, label: dict.nav.manageLounge, icon: LayoutDashboard },
     { path: `/manage/${loungeId}/staff`, label: dict.nav.staff, icon: Users },
     { path: `/pos/${loungeId}/shifts`, label: dict.nav.shiftReports, icon: ClipboardList },
+    { path: `/pos/${loungeId}/reports`, label: dict.nav.revenueReports, icon: ChartColumn },
   ];
   const current = pathname.replace(/^\/[^/]+/, "");
 

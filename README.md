@@ -185,6 +185,15 @@ method, cash given and change. While a session is still running it prints as a *
 through a hidden iframe without leaving the screen; `?print=1` opens the print dialog on its own. Only staff of that
 lounge can open a receipt.
 
+## Revenue reports
+
+Managers and owners open `/[locale]/pos/<loungeId>/reports` (the chart icon on the POS, or "Revenue reports" in the
+staff menu) for a month at a time (`?month=YYYY-MM`, the current one by default). It adds up every successful payment
+minus refunds, whichever shift took it, by business day: a sale after midnight before an overnight close counts for
+the day before. It shows the month's net revenue, the gaming and canteen split (a session's payment is shared in
+proportion to its play and canteen subtotals, as on the Z-report), totals by payment method, cash expenses, the daily
+average and best day, and one row per day.
+
 ## Realtime
 
 ```
