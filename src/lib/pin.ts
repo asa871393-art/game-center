@@ -1,9 +1,9 @@
 import bcrypt from "bcryptjs";
 
 /**
- * POS PIN codes: 4-6 digits a staff member types on the keypad after picking their name. PINs
- * are the only way to sign in, from any browser, so brute force is bounded by the escalating
- * lockout below: each further burst of wrong PINs doubles the wait, up to a day.
+ * POS PIN codes: 4-6 digits a staff member types on the keypad; the PIN alone says who they are,
+ * so PINs are unique within a branch. PINs are the only way to sign in, so brute force is bounded
+ * by the escalating lockout below: each further burst of wrong PINs doubles the wait, up to a day.
  */
 
 export const PIN_MIN_LENGTH = 4;

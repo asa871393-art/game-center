@@ -1,6 +1,6 @@
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { db } from "@/server/db";
-import { checkStaffPin } from "@/server/services/pos-pin";
+import { checkBranchPin, setMemberPin } from "@/server/services/pos-pin";
 import { addStaffMember, grantLoungeAccess, listLoungeStaff, revokeLoungeAccess, updateStaffMember } from "@/server/services/staff-access";
 import { getLoungeAccess, getManagedLounge, getPlatformRole } from "@/server/staff";
 
@@ -116,24 +116,43 @@ describe("adding and editing staff from the dashboard", () => {
     expect(r).toMatchObject({ created: true, role: "STAFF" });
     expect(await db.user.findUniqueOrThrow({ where: { email } })).toMatchObject({ name: "Sara Ali", phone: "+964 750 123 4567", role: "STAFF" });
     expect(await getLoungeAccess(r.userId, loungeId)).toEqual({ loungeId, role: "STAFF" });
-    expect(await checkStaffPin({ loungeId, userId: r.userId, pin: "4821" })).toEqual({ ok: true, userId: r.userId });
+    expect(await checkBranchPin({ loungeId, pin: "4821" })).toEqual({ ok: true, userId: r.userId });
     expect((await listLoungeStaff(loungeId)).find((m) => m.userId === r.userId)).toMatchObject({ hasPin: true, onShift: false, phone: "+964 750 123 4567" });
   });
 
-  it("locks PIN sign-in after five wrong PINs, for longer each time, and a correct PIN resets it", async () => {
-    const r = await addStaffMember(asOwner(), { email: mail("lockout"), name: "L", phone: null, role: "STAFF", pin: "4821", actorRole: "OWNER" });
+  it("locks PIN sign-in at the branch after five wrong PINs, for longer each time, and a correct PIN resets it", async () => {
+    const r = await addStaffMember(asOwner(), { email: mail("lockout"), name: "L", phone: null, role: "STAFF", pin: "6307", actorRole: "OWNER" });
     const t0 = new Date();
     const at = (ms: number) => new Date(t0.getTime() + ms);
-    for (let i = 4; i >= 1; i--) expect(await checkStaffPin({ loungeId, userId: r.userId, pin: "9999" }, t0)).toEqual({ ok: false, reason: "INVALID", attemptsLeft: i });
-    expect(await checkStaffPin({ loungeId, userId: r.userId, pin: "9999" }, t0)).toEqual({ ok: false, reason: "LOCKED", retryAfter: 60 });
-    // Even the right PIN waits out the lock.
-    expect(await checkStaffPin({ loungeId, userId: r.userId, pin: "4821" }, at(30_000))).toMatchObject({ reason: "LOCKED" });
+    try {
+      for (let i = 4; i >= 1; i--) expect(await checkBranchPin({ loungeId, pin: "9990" }, t0)).toEqual({ ok: false, reason: "INVALID", attemptsLeft: i });
+      expect(await checkBranchPin({ loungeId, pin: "9990" }, t0)).toEqual({ ok: false, reason: "LOCKED", retryAfter: 60 });
+      // Even the right PIN waits out the lock.
+      expect(await checkBranchPin({ loungeId, pin: "6307" }, at(30_000))).toMatchObject({ reason: "LOCKED" });
 
-    for (let i = 0; i < 4; i++) await checkStaffPin({ loungeId, userId: r.userId, pin: "9999" }, at(61_000));
-    expect(await checkStaffPin({ loungeId, userId: r.userId, pin: "9999" }, at(61_000))).toEqual({ ok: false, reason: "LOCKED", retryAfter: 120 });
+      for (let i = 0; i < 4; i++) await checkBranchPin({ loungeId, pin: "9990" }, at(61_000));
+      expect(await checkBranchPin({ loungeId, pin: "9990" }, at(61_000))).toEqual({ ok: false, reason: "LOCKED", retryAfter: 120 });
 
-    expect(await checkStaffPin({ loungeId, userId: r.userId, pin: "4821" }, at(182_000))).toEqual({ ok: true, userId: r.userId });
-    expect(await checkStaffPin({ loungeId, userId: r.userId, pin: "9999" }, at(182_000))).toEqual({ ok: false, reason: "INVALID", attemptsLeft: 4 });
+      expect(await checkBranchPin({ loungeId, pin: "6307" }, at(182_000))).toEqual({ ok: true, userId: r.userId });
+      expect(await checkBranchPin({ loungeId, pin: "9990" }, at(182_000))).toEqual({ ok: false, reason: "INVALID", attemptsLeft: 4 });
+    } finally {
+      await db.lounge.update({ where: { id: loungeId }, data: { pinFailedAttempts: 0, pinLockedUntil: null } });
+    }
+  });
+
+  it("keeps PINs unique at the branch and signs nobody in on a PIN two people share", async () => {
+    const a = await addStaffMember(asOwner(), { email: mail("uniq-a"), name: "A", phone: null, role: "STAFF", pin: "7149", actorRole: "OWNER" });
+    await expectCode(addStaffMember(asOwner(), { email: mail("uniq-b"), name: "B", phone: null, role: "STAFF", pin: "7149", actorRole: "OWNER" }), "PIN_TAKEN");
+    const b = await addStaffMember(asOwner(), { email: mail("uniq-b"), name: "B", phone: null, role: "STAFF", pin: null, actorRole: "OWNER" });
+    await expectCode(setMemberPin(asOwner(), { memberId: b.memberId, pin: "7149", actorRole: "OWNER" }), "PIN_TAKEN");
+    // Setting your own PIN again is fine.
+    await setMemberPin(asOwner(), { memberId: a.memberId, pin: "7149", actorRole: "OWNER" });
+
+    // A PIN shared from before PINs had to be unique.
+    const shared = await db.user.findUniqueOrThrow({ where: { id: a.userId }, select: { pinHash: true } });
+    await db.user.update({ where: { id: b.userId }, data: { pinHash: shared.pinHash } });
+    expect(await checkBranchPin({ loungeId, pin: "7149" })).toEqual({ ok: false, reason: "SHARED" });
+    await setMemberPin(asOwner(), { memberId: b.memberId, pin: "7150", actorRole: "OWNER" });
   });
 
   it("keeps an existing account's name and refuses weak PINs and managers added by managers", async () => {
@@ -147,7 +166,7 @@ describe("adding and editing staff from the dashboard", () => {
     await expectCode(addStaffMember(asManager, { email: mail("mgr3"), name: "M", phone: null, role: "MANAGER", pin: null, actorRole: "MANAGER" }), "FORBIDDEN");
     // Re-adding the owner's address can't set the owner's PIN.
     await expectCode(
-      addStaffMember(asManager, { email: "owner@gamelounge.dev", name: "x", phone: null, role: "STAFF", pin: "4821", actorRole: "MANAGER" }),
+      addStaffMember(asManager, { email: "owner@gamelounge.dev", name: "x", phone: null, role: "STAFF", pin: "5072", actorRole: "MANAGER" }),
       "FORBIDDEN",
     );
   });

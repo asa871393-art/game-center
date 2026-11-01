@@ -295,6 +295,10 @@ export interface Lounge {
   coverImageUrl: string | null;
   floorPlanWidth: number;
   floorPlanHeight: number;
+  /** Wrong PINs typed on this branch's keypad since the last correct one (sign-in is PIN only, no name). */
+  pinFailedAttempts: number;
+  /** PIN sign-in at this branch is refused until then. */
+  pinLockedUntil: Date | null;
   createdAt: Date;
   updatedAt: Date;
 }

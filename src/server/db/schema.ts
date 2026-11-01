@@ -561,6 +561,16 @@ export const MODELS: Record<ModelName, ModelMeta> = {
           "value": 16
         }
       },
+      "pinFailedAttempts": {
+        "type": "Int",
+        "default": {
+          "value": 0
+        }
+      },
+      "pinLockedUntil": {
+        "type": "DateTime",
+        "optional": true
+      },
       "createdAt": {
         "type": "DateTime",
         "default": {

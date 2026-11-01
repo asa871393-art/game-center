@@ -7,25 +7,25 @@ import { authSecret } from "@/lib/env";
 import { PIN_PATTERN } from "@/lib/pin";
 import { posCallback } from "@/lib/pos-login";
 import { signPinTicket } from "@/lib/pin-ticket";
-import { checkStaffPin } from "@/server/services/pos-pin";
+import { checkBranchPin } from "@/server/services/pos-pin";
 import { getPrimaryLoungeId } from "@/server/staff";
 import { isTrustedTerminal } from "@/server/terminal";
 
 /**
- * POS PIN sign-in: { userId, pin, locale?, callbackUrl? } from the keypad on /pos/login.
- * The only sign-in: works for members of the branch (the primary lounge) from any browser, so
- * wrong PINs lock the account's PIN sign-in after every fifth, for longer each time.
+ * POS PIN sign-in: { pin, locale?, callbackUrl? } from the keypad on /pos/login. The PIN alone
+ * says who is signing in (PINs are unique within the branch). The only sign-in, so wrong PINs
+ * lock PIN sign-in at the branch after every fifth, for longer each time.
  *
  * 200 { redirectTo }                   signed in (Auth.js session cookie set)
  * 400 { error: "VALIDATION" }          malformed body
  * 401 { error: "INVALID_PIN", attemptsLeft }
+ * 409 { error: "SHARED_PIN" }         more than one person has this PIN; a manager must change one
  * 403 { error: "NO_TERMINAL" }         no branch to sign in to, cross-site request, or a browser
  *                                      that hasn't entered the branch code (POS_TERMINAL_CODE)
  * 429 { error: "LOCKED", retryAfter }  with a Retry-After header
  */
 
 const bodySchema = z.object({
-  userId: z.string().min(1).max(64),
   pin: z.string().regex(PIN_PATTERN),
   locale: z.string().max(5).optional(),
   callbackUrl: z.string().max(512).optional(),
@@ -43,10 +43,10 @@ export async function POST(request: NextRequest) {
 
   const parsed = bodySchema.safeParse(await request.json().catch(() => null));
   if (!parsed.success) return NextResponse.json({ error: "VALIDATION" }, { status: 400 });
-  const { userId, pin } = parsed.data;
+  const { pin } = parsed.data;
   const locale = isLocale(parsed.data.locale) ? parsed.data.locale : "ar";
 
-  const result = await checkStaffPin({ loungeId, userId, pin });
+  const result = await checkBranchPin({ loungeId, pin });
   if (!result.ok) {
     if (result.reason === "LOCKED") {
       return NextResponse.json(
@@ -54,6 +54,7 @@ export async function POST(request: NextRequest) {
         { status: 429, headers: { "Retry-After": String(result.retryAfter) } },
       );
     }
+    if (result.reason === "SHARED") return NextResponse.json({ error: "SHARED_PIN" }, { status: 409 });
     return NextResponse.json({ error: "INVALID_PIN", attemptsLeft: result.attemptsLeft }, { status: 401 });
   }
 
