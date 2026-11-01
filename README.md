@@ -312,21 +312,24 @@ PINs are set by managers and owners on the staff screens (`/[locale]/manage/<lou
 `npm run staff:grant -- someone@example.com --pin 4821` (add `--role MANAGER` or `--role SUPER_ADMIN`). An account
 without a PIN can't sign in, so give at least one admin a PIN with the CLI before relying on the keypad.
 
-## Deploying (Firebase App Hosting)
+## Deploying (Vercel)
 
-The site runs on [Firebase App Hosting](https://firebase.google.com/docs/app-hosting), in the same Firebase project
-as the database. App Hosting builds and deploys `main` from GitHub on every push. `apphosting.yaml` holds its settings.
-Firestore needs no key there: the Admin SDK signs in as the backend's service account (from `FIREBASE_CONFIG`, which
-App Hosting sets).
+The site runs on [Vercel](https://vercel.com), which builds and deploys `main` from GitHub on every push (and a
+preview for every pull request). Firestore stays in Firebase and works on the free Spark plan. Menu photo uploads need
+Firebase Storage, which needs the Blaze plan; without a bucket they are turned off and the rest of the app works.
 
-1. Set up the Firebase project as in [Firebase](#firebase), and upgrade it to the Blaze plan (App Hosting requires it).
-2. Firebase console → Build → App Hosting → Get started: connect the GitHub repository, root directory `/`, live
-   branch `main`, automatic rollouts on.
-3. Create the secrets `apphosting.yaml` references before the first rollout: `AUTH_SECRET` (32+ random characters,
-   `openssl rand -base64 32`) and `POS_TERMINAL_CODE` (see [Branch code](#branch-code-recommended-on-a-public-url)),
-   from the backend's Settings → Environment, or `npx firebase apphosting:secrets:set AUTH_SECRET`.
-4. After the first rollout, set `NEXT_PUBLIC_APP_URL` in `apphosting.yaml` to the backend URL or your domain.
-5. Give an admin a PIN against the production Firestore (`npm run staff:grant -- you@example.com --role SUPER_ADMIN --pin <digits>`).
+1. Set up the Firebase project as in [Firebase](#firebase).
+2. Vercel → Add New → Project → import this GitHub repository. Vercel detects Next.js; keep the defaults.
+3. Before the first deploy, add the environment variables (Project → Settings → Environment Variables):
+   `AUTH_SECRET` (32+ random characters, `openssl rand -base64 32`), `NEXT_PUBLIC_FIREBASE_PROJECT_ID`,
+   `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY` (from Firebase console → Project settings → Service accounts →
+   Generate new private key; paste the key as is), and `POS_TERMINAL_CODE` (see
+   [Branch code](#branch-code-recommended-on-a-public-url)). After the first deploy, set `NEXT_PUBLIC_APP_URL` to the
+   site URL and redeploy.
+4. Give an admin a PIN against the production Firestore (`npm run staff:grant -- you@example.com --role SUPER_ADMIN --pin <digits>`).
+
+On Firebase App Hosting instead, no key is needed: the Admin SDK falls back to the runtime's own service account
+through `FIREBASE_CONFIG`.
 
 ### Firestore rules and indexes from GitHub
 
