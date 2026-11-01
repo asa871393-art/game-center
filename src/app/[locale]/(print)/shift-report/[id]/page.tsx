@@ -81,7 +81,8 @@ function Report({ s, locale, dict }: { s: ShiftSummary; locale: Locale; dict: Di
       className="receipt-paper mx-auto mb-6 w-[80mm] bg-white px-[4mm] py-[4mm] text-[12px] leading-snug text-black shadow-lg"
     >
       <header className="text-center">
-        <div className="text-[20px] leading-tight font-extrabold">{dict.common.appName}</div>
+        {/* eslint-disable-next-line @next/next/no-img-element -- printed as-is; no optimisation needed */}
+        <img src="/brand/logo-mono.png" alt={dict.common.appName} className="mx-auto mb-1 h-auto w-[44mm]" />
         <div className="text-[14px] font-bold">{s.lounge.name}</div>
         <div className="mt-1 text-[13px] font-bold">
           {dict.shift.reportTitle}
