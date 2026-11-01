@@ -234,7 +234,7 @@ Booking / Device / CanteenOrder / Shift / ShiftExpense / MenuItem / MenuCategory
 - **Fallback:** the board shows *Live*, *Connecting…* or *Polling*. Polling runs every 15 s while live updates are down
   and every 2 min as a safety net when they're up.
 - **Hosting:** each open board holds one HTTP connection. Behind nginx, `X-Accel-Buffering: no` is already set. On
-  serverless hosts (Netlify) a stream lasts at most as long as the function, then EventSource reconnects.
+  serverless hosts a stream lasts at most as long as the request timeout, then EventSource reconnects.
 
 ## Localization
 
@@ -312,32 +312,29 @@ PINs are set by managers and owners on the staff screens (`/[locale]/manage/<lou
 `npm run staff:grant -- someone@example.com --pin 4821` (add `--role MANAGER` or `--role SUPER_ADMIN`). An account
 without a PIN can't sign in, so give at least one admin a PIN with the CLI before relying on the keypad.
 
-## Deploying (Netlify)
+## Deploying (Firebase App Hosting)
 
-`netlify.toml` builds with `npm run build`, which needs no database or Firebase secrets.
+The site runs on [Firebase App Hosting](https://firebase.google.com/docs/app-hosting), in the same Firebase project
+as the database. App Hosting builds and deploys `main` from GitHub on every push. `apphosting.yaml` holds its settings.
+Firestore needs no key there: the Admin SDK signs in as the backend's service account (from `FIREBASE_CONFIG`, which
+App Hosting sets).
 
-1. Set up the Firebase project as in [Firebase](#firebase), including `npm run firestore:deploy`. A query whose
-   composite index is missing fails with a Firestore error containing a link that creates it.
-2. In Netlify → Site configuration → Environment variables set `AUTH_SECRET` (`NEXTAUTH_SECRET` also works), `NEXT_PUBLIC_APP_URL` (your site URL),
-   `NEXT_PUBLIC_FIREBASE_PROJECT_ID`, `FIREBASE_CLIENT_EMAIL`, `FIREBASE_PRIVATE_KEY`, plus the storage bucket you use,
-   and `POS_TERMINAL_CODE` (see [Branch code](#branch-code-recommended-on-a-public-url)).
-3. Give an admin a PIN against the production Firestore (`npm run staff:grant -- you@example.com --role SUPER_ADMIN --pin <digits>`).
+1. Set up the Firebase project as in [Firebase](#firebase), and upgrade it to the Blaze plan (App Hosting requires it).
+2. Firebase console → Build → App Hosting → Get started: connect the GitHub repository, root directory `/`, live
+   branch `main`, automatic rollouts on.
+3. Create the secrets `apphosting.yaml` references before the first rollout: `AUTH_SECRET` (32+ random characters,
+   `openssl rand -base64 32`) and `POS_TERMINAL_CODE` (see [Branch code](#branch-code-recommended-on-a-public-url)),
+   from the backend's Settings → Environment, or `npx firebase apphosting:secrets:set AUTH_SECRET`.
+4. After the first rollout, set `NEXT_PUBLIC_APP_URL` in `apphosting.yaml` to the backend URL or your domain.
+5. Give an admin a PIN against the production Firestore (`npm run staff:grant -- you@example.com --role SUPER_ADMIN --pin <digits>`).
 
-### Automatic deploys from GitHub
+### Firestore rules and indexes from GitHub
 
-`.github/workflows/deploy.yml` deploys every push to `main` once the CI checks pass (or run it by hand from the
-Actions tab → Deploy → Run workflow). It deploys the Firestore rules and indexes, then builds on a Linux runner and
-deploys to Netlify production, so `scripts/deploy-netlify.sh` is only needed for a manual deploy. Add these in GitHub →
-Settings → Secrets and variables → Actions:
-
-- `NETLIFY_AUTH_TOKEN` (secret): Netlify → User settings → Applications → Personal access tokens.
-- `FIREBASE_SERVICE_ACCOUNT` (secret): the whole JSON key from Firebase console → Project settings → Service accounts →
-  Generate new private key. The service account needs permission to deploy Firestore rules and indexes (the default
-  Firebase Admin SDK account has it).
-- `NETLIFY_SITE_ID` (variable, optional): defaults to the existing `game-center-lounge` site.
-
-A deploy step whose secret is missing is skipped with a warning. The app's own settings stay in Netlify's environment
-variables (step 2 above); the build pulls them from there.
+`.github/workflows/deploy.yml` runs the CI checks on every push to `main`, then deploys the Firestore rules and
+indexes (or run it by hand: Actions tab → Deploy → Run workflow). It needs the repository secret
+`FIREBASE_SERVICE_ACCOUNT` (GitHub → Settings → Secrets and variables → Actions): the whole JSON key from Firebase
+console → Project settings → Service accounts → Generate new private key. Without it the step is skipped with a
+warning. A query whose composite index is missing fails with a Firestore error containing a link that creates it.
 
 Don't run `db:seed` against a production project: it creates `player@gamelounge.dev` as a super admin with a published
 PIN.

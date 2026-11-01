@@ -36,7 +36,7 @@ export const { handlers, auth, signIn, signOut } = NextAuth({
   session: { strategy: "jwt" },
   // AUTH_SECRET, or NEXTAUTH_SECRET on deployments configured with the v4 name.
   secret: authSecret,
-  // Take the host from the request (Netlify's deploy and branch URLs); AUTH_URL / NEXTAUTH_URL override it.
+  // Take the host from the request (the hosting provider's URLs); AUTH_URL / NEXTAUTH_URL override it.
   trustHost: true,
   providers: [
     /**

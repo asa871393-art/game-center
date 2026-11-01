@@ -1,13 +1,14 @@
 import "server-only";
-import { cert, deleteApp, getApp, getApps, initializeApp, type App } from "firebase-admin/app";
+import { applicationDefault, cert, deleteApp, getApp, getApps, initializeApp, type App } from "firebase-admin/app";
 import type { Auth } from "firebase-admin/auth";
 import { getFirestore, type Firestore } from "firebase-admin/firestore";
 import { getStorage, type Storage } from "firebase-admin/storage";
-import { env, firebaseAdminConfig } from "@/lib/env";
+import { env, firebaseAdminConfig, firebaseManagedConfig } from "@/lib/env";
 
 /**
  * Firebase Admin SDK for Server Actions and route handlers, authenticated with a service
- * account (FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY). Bypasses Security Rules, so only
+ * account (FIREBASE_CLIENT_EMAIL + FIREBASE_PRIVATE_KEY), or on Firebase App Hosting with the
+ * backend's own service account (no key needed). Bypasses Security Rules, so only
  * call it after the app's own permission checks. Initialized lazily and once per process
  * (the named app survives dev hot reloads via getApps()).
  *
@@ -31,7 +32,8 @@ export class FirebaseAdminNotConfiguredError extends Error {
 
 const usesEmulator = () => Boolean(process.env.FIRESTORE_EMULATOR_HOST);
 
-export const isFirebaseAdminConfigured = firebaseAdminConfig !== null || usesEmulator();
+export const isFirebaseAdminConfigured =
+  firebaseAdminConfig !== null || firebaseManagedConfig !== null || usesEmulator();
 
 export function getAdminApp(): App {
   if (getApps().some((a) => a.name === APP_NAME)) return getApp(APP_NAME);
@@ -52,12 +54,16 @@ export function getAdminApp(): App {
     }
     return initializeApp({ credential, projectId, storageBucket }, APP_NAME);
   }
+  if (firebaseManagedConfig) {
+    const { projectId, storageBucket } = firebaseManagedConfig;
+    return initializeApp({ credential: applicationDefault(), projectId, storageBucket }, APP_NAME);
+  }
   throw new FirebaseAdminNotConfiguredError();
 }
 
 /**
  * Loaded on demand: firebase-admin/auth pulls in jwks-rsa, which require()s the ESM-only jose and
- * crashes on runtimes without require(esm) (Netlify's functions), taking every Firestore call with it.
+ * crashes on runtimes without require(esm), taking every Firestore call with it.
  */
 export async function getAdminAuth(): Promise<Auth> {
   const { getAuth } = await import("firebase-admin/auth");
