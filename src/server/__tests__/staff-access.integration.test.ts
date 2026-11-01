@@ -184,4 +184,24 @@ describe("adding and editing staff from the dashboard", () => {
     await updateStaffMember(asOwner(), { memberId: cashier.memberId, name: "Cashier Two", phone: null, role: "MANAGER", actorRole: "OWNER" });
     expect(await getLoungeAccess(cashier.userId, loungeId)).toEqual({ loungeId, role: "MANAGER" });
   });
+
+  it("changes a member's email and refuses an email or phone another account holds", async () => {
+    const one = await addStaffMember(asOwner(), { email: mail("contact-1"), name: "One", phone: "0770 111 2222", role: "STAFF", pin: null, actorRole: "OWNER" });
+    const two = await addStaffMember(asOwner(), { email: mail("contact-2"), name: "Two", phone: null, role: "STAFF", pin: null, actorRole: "OWNER" });
+    const fresh = mail("contact-new");
+
+    await updateStaffMember(asOwner(), { memberId: two.memberId, name: "Two", email: fresh.toUpperCase(), phone: null, role: "STAFF", actorRole: "OWNER" });
+    expect(await db.user.findUniqueOrThrow({ where: { id: two.userId } })).toMatchObject({ email: fresh, emailVerified: null });
+
+    await expectCode(
+      updateStaffMember(asOwner(), { memberId: two.memberId, name: "Two", email: mail("contact-1"), phone: null, role: "STAFF", actorRole: "OWNER" }),
+      "EMAIL_TAKEN",
+    );
+    await expectCode(
+      updateStaffMember(asOwner(), { memberId: two.memberId, name: "Two", phone: "0770 111 2222", role: "STAFF", actorRole: "OWNER" }),
+      "PHONE_TAKEN",
+    );
+    // Saving your own unchanged email and phone is fine.
+    await updateStaffMember(asOwner(), { memberId: one.memberId, name: "One!", email: mail("contact-1"), phone: "0770 111 2222", role: "STAFF", actorRole: "OWNER" });
+  });
 });

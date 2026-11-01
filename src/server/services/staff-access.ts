@@ -134,12 +134,21 @@ export async function addStaffMember(
 }
 
 /**
- * Edits a member's name, phone and lounge role. Owners edit anyone and change roles; managers
- * edit cashiers and themselves. Owners' roles, and your own, don't change here.
+ * Edits a member's name, email, phone and lounge role. Owners edit anyone and change roles; managers
+ * edit cashiers and themselves. Owners' roles, and your own, don't change here. Email and phone are
+ * unique across accounts, so taking one that another account holds fails with EMAIL_TAKEN / PHONE_TAKEN.
  */
 export async function updateStaffMember(
   ctx: PosContext,
-  input: { memberId: string; name: string; phone: string | null; role: GrantableRole; actorRole: LoungeMemberRole },
+  input: {
+    memberId: string;
+    name: string;
+    /** Omitted keeps the current address. */
+    email?: string;
+    phone: string | null;
+    role: GrantableRole;
+    actorRole: LoungeMemberRole;
+  },
 ) {
   return db.$transaction(async (tx) => {
     const member = await tx.loungeMember.findUnique({
@@ -152,7 +161,23 @@ export async function updateStaffMember(
     const roleChanged = member.role !== "OWNER" && member.role !== input.role;
     if (roleChanged && (isSelf || input.actorRole !== "OWNER")) throw new PosError("FORBIDDEN");
 
-    await tx.user.update({ where: { id: member.userId }, data: { name: input.name.trim(), phone: input.phone?.trim() || null } });
+    const user = await tx.user.findUniqueOrThrow({ where: { id: member.userId }, select: { email: true, phone: true } });
+    const email = input.email?.trim().toLowerCase() || user.email;
+    const phone = input.phone?.trim() || null;
+    const emailChanged = email !== user.email;
+    const phoneChanged = phone !== user.phone;
+    if (emailChanged && email && (await tx.user.findUnique({ where: { email }, select: { id: true } }))) throw new PosError("EMAIL_TAKEN");
+    if (phoneChanged && phone && (await tx.user.findUnique({ where: { phone }, select: { id: true } }))) throw new PosError("PHONE_TAKEN");
+
+    await tx.user.update({
+      where: { id: member.userId },
+      data: {
+        name: input.name.trim(),
+        phone,
+        // A new address hasn't been verified by its owner yet.
+        ...(emailChanged ? { email, emailVerified: null } : {}),
+      },
+    });
     if (roleChanged) await tx.loungeMember.update({ where: { id: member.id }, data: { role: input.role } });
     await tx.auditLog.create({
       data: {
@@ -161,7 +186,11 @@ export async function updateStaffMember(
         action: "staff.update",
         entityType: "LoungeMember",
         entityId: member.id,
-        data: { userId: member.userId, ...(roleChanged ? { from: member.role, to: input.role } : {}) },
+        data: {
+          userId: member.userId,
+          ...(roleChanged ? { from: member.role, to: input.role } : {}),
+          ...(emailChanged ? { emailFrom: user.email, emailTo: email } : {}),
+        },
       },
     });
   });
