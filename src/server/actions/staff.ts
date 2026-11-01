@@ -69,9 +69,15 @@ export async function addStaffAction(payload: z.input<typeof addSchema>) {
   });
 }
 
-const updateSchema = base.extend({ memberId: id, name, phone, role: z.enum(["STAFF", "MANAGER"]) });
+const updateSchema = base.extend({
+  memberId: id,
+  name,
+  email: z.email().trim().toLowerCase().max(254).optional(),
+  phone,
+  role: z.enum(["STAFF", "MANAGER"]),
+});
 
-/** Edits a member's name, phone and (owners only) lounge role. */
+/** Edits a member's name, email, phone and (owners only) lounge role. */
 export async function updateStaffAction(payload: z.input<typeof updateSchema>) {
   return run(updateSchema, payload, "MANAGER", async (ctx, i) => {
     await updateStaffMember(ctx, { ...i, actorRole: await actorRole(ctx) });

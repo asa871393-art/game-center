@@ -256,7 +256,8 @@ function AddForm({ loungeId, isOwner, onDone }: { loungeId: string; isOwner: boo
   );
 }
 
-function EditForm({
+/** Edit a member's name, email, phone and (where allowed) role. Shared by the dashboard and the POS staff screen. */
+export function EditForm({
   loungeId,
   member,
   canChangeRole,
@@ -270,10 +271,13 @@ function EditForm({
   const { dict, locale, t } = useI18n();
   const s = dict.staffManage;
   const [name, setName] = useState(member.name ?? "");
+  const [email, setEmail] = useState(member.email ?? "");
   const [phone, setPhone] = useState(member.phone ?? "");
   const [role, setRole] = useState<GrantRole>(member.role === "MANAGER" ? "MANAGER" : "STAFF");
   const [pending, startTransition] = useTransition();
-  const valid = name.trim().length > 0 && (!phone.trim() || PHONE.test(phone.trim()));
+  // An account without an address may stay without one; otherwise it must be a valid email.
+  const emailOk = email.trim() ? EMAIL.test(email.trim()) : !member.email;
+  const valid = name.trim().length > 0 && emailOk && (!phone.trim() || PHONE.test(phone.trim()));
 
   const submit = () =>
     startTransition(async () => {
@@ -282,6 +286,7 @@ function EditForm({
         loungeId,
         memberId: member.memberId,
         name: name.trim(),
+        email: email.trim().toLowerCase() || undefined,
         phone: phone.trim() || null,
         // An owner's role isn't editable; send the current one so it is left alone.
         role: canChangeRole ? role : member.role === "MANAGER" ? "MANAGER" : "STAFF",
@@ -304,12 +309,22 @@ function EditForm({
     >
       <DialogHeader>
         <DialogTitle>{t(s.editTitle, { name: label(member) })}</DialogTitle>
-        <DialogDescription dir="ltr" className="text-start">
-          {member.email}
-        </DialogDescription>
+        <DialogDescription>{s.editHint}</DialogDescription>
       </DialogHeader>
       <Field id="edit-name" label={s.fullName}>
         <Input id="edit-name" required maxLength={80} value={name} onChange={(e) => setName(e.target.value)} />
+      </Field>
+      <Field id="edit-email" label={s.email}>
+        <Input
+          id="edit-email"
+          type="email"
+          inputMode="email"
+          dir="ltr"
+          maxLength={254}
+          autoComplete="off"
+          value={email}
+          onChange={(e) => setEmail(e.target.value)}
+        />
       </Field>
       <Field id="edit-phone" label={`${s.phone} (${s.optional})`}>
         <Input id="edit-phone" type="tel" inputMode="tel" dir="ltr" maxLength={32} value={phone} onChange={(e) => setPhone(e.target.value)} />

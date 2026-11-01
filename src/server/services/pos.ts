@@ -55,6 +55,8 @@ export type PosErrorCode =
   | "ACCOUNT_DISABLED"
   | "CANNOT_REMOVE_SELF"
   | "WEAK_PIN"
+  | "EMAIL_TAKEN"
+  | "PHONE_TAKEN"
   | "ZAINCASH_UNPAID"
   | "ZAINCASH_AMOUNT"
   | "GATEWAY_ERROR";
