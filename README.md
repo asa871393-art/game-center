@@ -113,8 +113,9 @@ a lounge.
   amount shown is the amount charged. Payments must add up exactly to the balance due.
 - An open session holds its seat until the next booking or closing time. At checkout the hold shrinks to the actual
   end.
-- **ZainCash at the counter** is recorded as `PaymentMethod.ZAINCASH`. It isn't connected to a ZainCash API; the cashier
-  confirms the transfer.
+- **ZainCash at the counter** is recorded as `PaymentMethod.ZAINCASH`. Without gateway credentials the cashier confirms
+  the transfer by hand. With `ZAINCASH_CLIENT_ID` and `ZAINCASH_CLIENT_SECRET` set it goes through ZainCash (API v2), see
+  [ZainCash gateway](#zaincash-gateway).
 
 **Shifts and the cash drawer** (`src/server/services/shift.ts`):
 - A lounge has one drawer, so at most one **open shift** (enforced by a partial unique index). The top bar shows the
@@ -184,6 +185,25 @@ Device Management and the dashboard):
 method, cash given and change. While a session is still running it prints as a *provisional bill*. The POS prints it
 through a hidden iframe without leaving the screen; `?print=1` opens the print dialog on its own. Only staff of that
 lounge can open a receipt.
+
+## ZainCash gateway
+
+Set `ZAINCASH_CLIENT_ID` and `ZAINCASH_CLIENT_SECRET` (from your ZainCash merchant account) to take ZainCash through
+ZainCash instead of a manual confirmation. `ZAINCASH_ENV=uat` (default) uses ZainCash's test environment
+(`pg-api-uat.zaincash.iq`); `live` uses `pg-api.zaincash.iq` (or set `ZAINCASH_BASE_URL` to the URL ZainCash gives you).
+`NEXT_PUBLIC_APP_URL` must be the public site URL: ZainCash sends the customer back to
+`<NEXT_PUBLIC_APP_URL>/api/zaincash/callback`.
+
+- In checkout or a counter sale, a ZainCash row shows **Request ZainCash payment** (1,000 IQD minimum, whole dinars).
+  That creates a `PENDING` ZAINCASH transaction (`provider: "zaincash"`, `providerRef`: ZainCash's id) and a payment page,
+  shown as a QR code for the customer to scan.
+- The customer pays in the ZainCash app; ZainCash redirects their phone to the callback with a JWT (HS256, signed with
+  the client secret), which marks the request paid. The POS polls `/api/manage/<loungeId>/zaincash/<id>`, which also asks
+  ZainCash (inquiry) in case the customer never reached the callback.
+- Once paid, the row is fixed (no discount or bill changes, no going back) and the cashier can charge. Checkout takes
+  the paid request as that part of the payment: the same transaction becomes `SUCCEEDED` and is attached to the session
+  or sale and the shift. A request can pay once, for its exact amount, at its own lounge.
+- Manual ZainCash is refused while the gateway is on (`ZAINCASH_UNPAID`), and the dashboard dialogs hide it.
 
 ## Revenue reports
 

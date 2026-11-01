@@ -9,6 +9,8 @@ import { computeBookingTotals, paymentStatusFor } from "@/lib/booking/totals";
 import { applyBps, fromMinor, toMinor, type Minor } from "@/lib/money";
 import { db, type TxClient, type DbReader, type UpdateData } from "@/server/db";
 import { BLOCKING_STATUSES } from "@/lib/db/types";
+import { isPaidRequest } from "@/server/payments/zaincash-request";
+import { zainCashConfig } from "@/server/payments/zaincash";
 import { generateReference, isOverlapViolation, MAX_DURATION_MINUTES, releaseBookings } from "./booking";
 
 /**
@@ -52,7 +54,10 @@ export type PosErrorCode =
   | "FORBIDDEN"
   | "ACCOUNT_DISABLED"
   | "CANNOT_REMOVE_SELF"
-  | "WEAK_PIN";
+  | "WEAK_PIN"
+  | "ZAINCASH_UNPAID"
+  | "ZAINCASH_AMOUNT"
+  | "GATEWAY_ERROR";
 
 export class PosError extends Error {
   constructor(public readonly code: PosErrorCode) {
@@ -85,6 +90,8 @@ export interface PaymentPart {
   amount: Minor;
   /** Cash handed over, for the change line on the receipt. */
   tendered?: Minor;
+  /** ZAINCASH only, when the gateway is connected: the paid ZainCash request this part uses. */
+  zainCashPaymentId?: string;
 }
 
 export interface OrderLineInput {
@@ -618,19 +625,71 @@ export async function transferSession(ctx: PosContext, input: { bookingId: strin
 function validatePayments(payments: readonly PaymentPart[], due: Minor) {
   const sum = payments.reduce((s, p) => s + p.amount, 0);
   const valid = payments.every(
-    (p) => Number.isInteger(p.amount) && p.amount > 0 && (p.tendered === undefined || (p.method === "CASH" && p.tendered >= p.amount)),
+    (p) =>
+      Number.isInteger(p.amount) &&
+      p.amount > 0 &&
+      (p.tendered === undefined || (p.method === "CASH" && p.tendered >= p.amount)) &&
+      (p.zainCashPaymentId === undefined || p.method === "ZAINCASH"),
   );
   if (!valid || sum !== Math.max(0, due)) throw new PosError("PAYMENT_MISMATCH");
+  // With the gateway connected, ZainCash is taken through it, never confirmed by hand.
+  if (zainCashConfig() && payments.some((p) => p.method === "ZAINCASH" && !p.zainCashPaymentId)) throw new PosError("ZAINCASH_UNPAID");
+  const ids = payments.flatMap((p) => (p.zainCashPaymentId ? [p.zainCashPaymentId] : []));
+  if (new Set(ids).size !== ids.length) throw new PosError("PAYMENT_MISMATCH");
 }
 
-function paymentRows(payments: readonly PaymentPart[], shiftId: string | null) {
-  return payments.map((p) => ({
-    shiftId,
-    method: p.method,
-    status: "SUCCEEDED" as const,
-    amount: fromMinor(p.amount),
-    ...(p.tendered !== undefined ? { metadata: { tendered: p.tendered, change: p.tendered - p.amount } } : {}),
-  }));
+interface PaymentLink {
+  loungeId: string;
+  shiftId: string | null;
+  processedById: string;
+  currency: string;
+  bookingId?: string;
+  canteenOrderId?: string;
+  userId?: string | null;
+}
+
+/**
+ * Loads the paid ZainCash requests a payment uses, checking they belong to this lounge, are paid,
+ * unused and for the same amount. Call before any write in the transaction.
+ */
+async function loadZainCashParts(tx: Tx, loungeId: string, payments: readonly PaymentPart[]) {
+  const parts = payments.filter((p) => p.zainCashPaymentId);
+  for (const p of parts) {
+    const row = await tx.transaction.findUnique({
+      where: { id: p.zainCashPaymentId! },
+      select: { loungeId: true, status: true, provider: true, metadata: true, amount: true },
+    });
+    if (!row || row.loungeId !== loungeId || !isPaidRequest(row)) throw new PosError("ZAINCASH_UNPAID");
+    if (toMinor(row.amount) !== p.amount) throw new PosError("PAYMENT_MISMATCH");
+  }
+}
+
+/** Records a checkout's payments: new rows, plus the paid ZainCash requests turned into settled payments. */
+async function recordPayments(tx: Tx, payments: readonly PaymentPart[], link: PaymentLink) {
+  const owner = {
+    shiftId: link.shiftId,
+    ...(link.bookingId ? { bookingId: link.bookingId } : {}),
+    ...(link.canteenOrderId ? { canteenOrderId: link.canteenOrderId } : {}),
+    ...(link.userId !== undefined ? { userId: link.userId } : {}),
+  };
+  for (const p of payments) {
+    if (p.zainCashPaymentId) await tx.transaction.update({ where: { id: p.zainCashPaymentId }, data: { ...owner, status: "SUCCEEDED" } });
+  }
+  const fresh = payments.filter((p) => !p.zainCashPaymentId);
+  if (!fresh.length) return;
+  await tx.transaction.createMany({
+    data: fresh.map((p) => ({
+      ...owner,
+      loungeId: link.loungeId,
+      processedById: link.processedById,
+      type: "PAYMENT" as const,
+      currency: link.currency,
+      method: p.method,
+      status: "SUCCEEDED" as const,
+      amount: fromMinor(p.amount),
+      ...(p.tendered !== undefined ? { metadata: { tendered: p.tendered, change: p.tendered - p.amount } } : {}),
+    })),
+  });
 }
 
 export interface EndSessionInput {
@@ -677,6 +736,7 @@ export async function endSession(ctx: PosContext, input: EndSessionInput) {
       if (input.discount !== undefined && due < 0) throw new PosError("DISCOUNT_INVALID");
       validatePayments(input.payments, due);
       const shiftId = await requireShiftFor(tx, ctx.loungeId, input.payments);
+      await loadZainCashParts(tx, ctx.loungeId, input.payments);
 
       const pausedExtra = booking.pausedAt ? billableMinutes(booking.pausedAt, until) : 0;
       await guardedUpdate(tx, booking, {
@@ -693,16 +753,13 @@ export async function endSession(ctx: PosContext, input: EndSessionInput) {
           : {}),
       });
       if (input.payments.length) {
-        await tx.transaction.createMany({
-          data: paymentRows(input.payments, shiftId).map((row) => ({
-            ...row,
-            loungeId: ctx.loungeId,
-            bookingId: booking.id,
-            userId: booking.customerId,
-            processedById: ctx.actorId,
-            type: "PAYMENT" as const,
-            currency: booking.currency,
-          })),
+        await recordPayments(tx, input.payments, {
+          loungeId: ctx.loungeId,
+          shiftId,
+          processedById: ctx.actorId,
+          currency: booking.currency,
+          bookingId: booking.id,
+          userId: booking.customerId,
         });
       }
       // Leave MAINTENANCE/OFFLINE alone; only a seat we marked busy goes back to idle.
@@ -830,6 +887,7 @@ export async function counterSale(ctx: PosContext, input: { items: OrderLineInpu
     const total = subtotal + tax;
     validatePayments(input.payments, total);
     const shiftId = await requireShiftFor(tx, ctx.loungeId, input.payments);
+    await loadZainCashParts(tx, ctx.loungeId, input.payments);
     const order = await tx.canteenOrder.create({
       data: {
         loungeId: ctx.loungeId,
@@ -843,15 +901,12 @@ export async function counterSale(ctx: PosContext, input: { items: OrderLineInpu
       select: { id: true },
     });
     if (input.payments.length) {
-      await tx.transaction.createMany({
-        data: paymentRows(input.payments, shiftId).map((row) => ({
-          ...row,
-          loungeId: ctx.loungeId,
-          canteenOrderId: order.id,
-          processedById: ctx.actorId,
-          type: "PAYMENT" as const,
-          currency: lounge.currency,
-        })),
+      await recordPayments(tx, input.payments, {
+        loungeId: ctx.loungeId,
+        shiftId,
+        processedById: ctx.actorId,
+        currency: lounge.currency,
+        canteenOrderId: order.id,
       });
     }
     await audit(tx, ctx, "canteen.counterSale", "CanteenOrder", order.id, { total, methods: input.payments.map((p) => p.method) });

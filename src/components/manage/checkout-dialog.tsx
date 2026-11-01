@@ -117,9 +117,11 @@ function CheckoutBody({ session, deviceName, onDone }: { session: PosSession; de
             <ToggleGroupItem value="CARD" className="flex-1">
               <CreditCard aria-hidden /> {dict.manage.checkout.CARD}
             </ToggleGroupItem>
-            <ToggleGroupItem value="ZAINCASH" className="flex-1">
-              <Smartphone aria-hidden /> {dict.pos.method.ZAINCASH}
-            </ToggleGroupItem>
+            {!data.zainCashGateway && (
+              <ToggleGroupItem value="ZAINCASH" className="flex-1">
+                <Smartphone aria-hidden /> {dict.pos.method.ZAINCASH}
+              </ToggleGroupItem>
+            )}
           </ToggleGroup>
         </div>
       ) : (

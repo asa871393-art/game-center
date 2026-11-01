@@ -63,7 +63,7 @@ import {
 } from "@/server/actions/pos";
 import type { PosDevice, PosSession } from "@/server/queries/manage";
 import { discountAmount, DiscountEditor, type DiscountInput } from "./discount-editor";
-import { nextRowKey, PaymentSplit, paymentsBalance, type PaymentRow } from "./payment-split";
+import { hasPaidZainCash, nextRowKey, PaymentSplit, paymentParts, paymentsBalance, paymentsReady, type PaymentRow } from "./payment-split";
 import { printReceipt } from "./print";
 import { useBillContext, useDevicePricing, useLiveBill } from "./use-live-bill";
 
@@ -668,12 +668,12 @@ function ActionButton({
   );
 }
 
-function BackBar({ title, onBack }: { title: string; onBack: () => void }) {
+function BackBar({ title, onBack, disabled }: { title: string; onBack: () => void; disabled?: boolean }) {
   const { dict } = useI18n();
   return (
     <div className="mb-4 flex items-center justify-between gap-2">
       <h3 className="text-lg font-semibold">{title}</h3>
-      <Button variant="ghost" onClick={onBack}>
+      <Button variant="ghost" onClick={onBack} disabled={disabled}>
         {dict.common.back}
       </Button>
     </div>
@@ -885,7 +885,10 @@ function CheckoutView({
   const [rows, setRows] = useState<PaymentRow[]>(() => [{ key: nextRowKey(), method: "CASH", amount: bill.due, tendered: null }]);
   const overDiscounted = bill.total < session.amountPaid;
   const needsShift = bill.due > 0 && !data.shift;
-  const balanced = paymentsBalance(rows, bill.due) === 0 && rows.every((r) => r.amount > 0 || bill.due === 0);
+  const balanced =
+    paymentsBalance(rows, bill.due) === 0 && rows.every((r) => r.amount > 0 || bill.due === 0) && paymentsReady(rows, data.zainCashGateway);
+  // Once ZainCash has been paid the bill is fixed: no recalculating, discounting or leaving checkout.
+  const locked = hasPaidZainCash(rows);
 
   // Any change to the bill resets the payment rows to "all cash" for the new amount.
   const rebillTo = (at: Date, d: DiscountInput) => {
@@ -931,15 +934,7 @@ function CheckoutView({
           version: session.version,
           billUntil: session.mode === "OPEN" ? billUntil.toISOString() : undefined,
           discount: bill.discount,
-          payments: bill.due > 0
-            ? rows
-                .filter((r) => r.amount > 0)
-                .map((r) => ({
-                  method: r.method,
-                  amount: r.amount,
-                  tendered: r.method === "CASH" && r.tendered !== null && r.tendered >= r.amount ? r.tendered : undefined,
-                }))
-            : [],
+          payments: bill.due > 0 ? paymentParts(rows) : [],
         }),
       (res) => {
         onCompleted({ receiptId: res.bookingId, deviceName: device.name, collected: res.collected });
@@ -948,7 +943,7 @@ function CheckoutView({
 
   return (
     <div className="space-y-4">
-      <BackBar title={dict.pos.checkout} onBack={onBack} />
+      <BackBar title={dict.pos.checkout} onBack={onBack} disabled={locked} />
 
       <div className="rounded-2xl border p-3 text-sm">
         {playLines.map((l) => (
@@ -1005,13 +1000,13 @@ function CheckoutView({
           <div className="text-3xl font-bold tabular-nums">{money(locale, bill.due, cur)}</div>
         </div>
         {session.mode === "OPEN" && (
-          <Button variant="ghost" onClick={recalc} title={dict.pos.recalculate}>
+          <Button variant="ghost" onClick={recalc} title={dict.pos.recalculate} disabled={locked}>
             <RefreshCw aria-hidden /> {formatTime(locale, billUntil, tz)}
           </Button>
         )}
       </div>
 
-      {discountOpen ? (
+      {locked ? null : discountOpen ? (
         <DiscountEditor value={discount} onChange={changeDiscount} currency={cur} />
       ) : (
         <Button variant="ghost" size="sm" onClick={() => setDiscountOpen(true)}>

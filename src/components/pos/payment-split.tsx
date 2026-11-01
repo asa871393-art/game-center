@@ -7,6 +7,8 @@ import { useI18n } from "@/i18n/client";
 import { money } from "@/i18n/format";
 import { toMinor, type Minor } from "@/lib/money";
 import { cn } from "@/lib/utils";
+import { usePos } from "@/components/manage/pos-context";
+import { ZainCashPay, type ZainCashState } from "./zaincash-pay";
 
 export type PayMethod = "CASH" | "CARD" | "ZAINCASH" | "FASTPAY";
 
@@ -16,6 +18,31 @@ export interface PaymentRow {
   amount: Minor;
   /** Cash handed over (cash rows only). */
   tendered: Minor | null;
+  /** ZainCash through the gateway: the payment requested for this row. */
+  zainCash?: ZainCashState;
+}
+
+/** A row is settled once its ZainCash payment is paid; until then it can't be charged, and after it can't change. */
+const zainCashPaid = (r: PaymentRow) => r.zainCash?.status === "PAID";
+
+/** Whether every ZainCash row has been paid through the gateway (always true without the gateway). */
+export function paymentsReady(rows: readonly PaymentRow[], gateway: boolean) {
+  return !gateway || rows.every((r) => r.method !== "ZAINCASH" || r.amount === 0 || zainCashPaid(r));
+}
+
+/** Whether a paid ZainCash payment pins the rows (the bill can't be changed any more). */
+export const hasPaidZainCash = (rows: readonly PaymentRow[]) => rows.some(zainCashPaid);
+
+/** The payload for the checkout actions. */
+export function paymentParts(rows: readonly PaymentRow[]) {
+  return rows
+    .filter((r) => r.amount > 0)
+    .map((r) => ({
+      method: r.method,
+      amount: r.amount,
+      tendered: r.method === "CASH" && r.tendered !== null && r.tendered >= r.amount ? r.tendered : undefined,
+      zainCashPaymentId: r.method === "ZAINCASH" && r.zainCash?.status === "PAID" ? r.zainCash.paymentId : undefined,
+    }));
 }
 
 export const payMethodMeta: Record<PayMethod, { icon: typeof Banknote }> = {
@@ -67,8 +94,13 @@ export function PaymentSplit({
   currency: string;
 }) {
   const { dict, locale } = useI18n();
+  const { data } = usePos();
+  const gateway = data.zainCashGateway;
   const remaining = paymentsBalance(rows, due);
-  const update = (key: number, patch: Partial<PaymentRow>) => onChange(rows.map((r) => (r.key === key ? { ...r, ...patch } : r)));
+  const locked = hasPaidZainCash(rows);
+  // Changing a row's method or amount drops its unpaid ZainCash request.
+  const update = (key: number, patch: Partial<PaymentRow>) =>
+    onChange(rows.map((r) => (r.key === key ? { ...r, ...patch, ...("method" in patch || "amount" in patch ? { zainCash: undefined } : {}) } : r)));
 
   const payAll = (method: PayMethod) => onChange([{ key: nextRowKey(), method, amount: due, tendered: null }]);
   const addRow = () =>
@@ -89,7 +121,13 @@ export function PaymentSplit({
           const Icon = payMethodMeta[m].icon;
           const active = rows.length === 1 && rows[0].method === m && rows[0].amount === due;
           return (
-            <Button key={m} variant={active ? "default" : "outline"} className="h-14 flex-col gap-0.5 text-sm" onClick={() => payAll(m)}>
+            <Button
+              key={m}
+              variant={active ? "default" : "outline"}
+              className="h-14 flex-col gap-0.5 text-sm"
+              onClick={() => payAll(m)}
+              disabled={locked}
+            >
               <Icon className="size-5" aria-hidden />
               {dict.pos.payAll[m]}
             </Button>
@@ -100,6 +138,8 @@ export function PaymentSplit({
       <ul className="space-y-2">
         {rows.map((row) => {
           const change = row.method === "CASH" && row.tendered !== null ? row.tendered - row.amount : null;
+          // A requested ZainCash payment fixes its row: cancel the request to change it.
+          const fixed = row.zainCash !== undefined && row.zainCash.status !== "FAILED";
           return (
             <li key={row.key} className="space-y-2 rounded-xl border bg-muted/30 p-2.5">
               <div className="flex items-center gap-2">
@@ -112,6 +152,7 @@ export function PaymentSplit({
                         size="icon-lg"
                         variant={row.method === m ? "default" : "ghost"}
                         onClick={() => update(row.key, { method: m, tendered: m === "CASH" ? row.tendered : null })}
+                        disabled={fixed}
                         aria-label={dict.pos.method[m]}
                         title={dict.pos.method[m]}
                       >
@@ -130,13 +171,22 @@ export function PaymentSplit({
                     if (v !== null) update(row.key, { amount: v });
                   }}
                   aria-label={dict.pos.amount}
+                  disabled={fixed}
                 />
-                {rows.length > 1 && (
+                {rows.length > 1 && !fixed && (
                   <Button size="icon-lg" variant="ghost" onClick={() => onChange(rows.filter((r) => r.key !== row.key))} aria-label={dict.common.close}>
                     <X />
                   </Button>
                 )}
               </div>
+              {gateway && row.method === "ZAINCASH" && row.amount > 0 && (
+                <ZainCashPay
+                  loungeId={data.lounge.id}
+                  amount={row.amount}
+                  state={row.zainCash}
+                  onChange={(zainCash) => onChange(rows.map((r) => (r.key === row.key ? { ...r, zainCash } : r)))}
+                />
+              )}
               {row.method === "CASH" && row.amount > 0 && (
                 <div className="flex flex-wrap items-center gap-1.5 text-sm">
                   <span className="text-muted-foreground">{dict.pos.cashGiven}:</span>
