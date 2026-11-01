@@ -10,7 +10,7 @@ import { useI18n } from "@/i18n/client";
 import { localName, money } from "@/i18n/format";
 import { applyBps } from "@/lib/money";
 import { counterSaleAction } from "@/server/actions/pos";
-import { nextRowKey, PaymentSplit, paymentsBalance, type PaymentRow } from "./payment-split";
+import { hasPaidZainCash, nextRowKey, PaymentSplit, paymentParts, paymentsBalance, paymentsReady, type PaymentRow } from "./payment-split";
 import { printReceipt } from "./print";
 
 /**
@@ -29,7 +29,9 @@ export function CounterPanel() {
   const items = cartLines(cart);
   const subtotal = cartSubtotal(cart, data.menuItems);
   const total = subtotal + applyBps(subtotal, data.lounge.taxRateBps);
-  const balanced = paymentsBalance(rows, total) === 0 && rows.every((r) => r.amount > 0);
+  const balanced = paymentsBalance(rows, total) === 0 && rows.every((r) => r.amount > 0) && paymentsReady(rows, data.zainCashGateway);
+  // A paid ZainCash payment fixes the sale: the cart can't change any more.
+  const locked = hasPaidZainCash(rows);
   const count = items.reduce((n, i) => n + i.quantity, 0);
 
   const reset = () => {
@@ -48,13 +50,7 @@ export function CounterPanel() {
           locale,
           loungeId: data.lounge.id,
           items,
-          payments: rows
-            .filter((r) => r.amount > 0)
-            .map((r) => ({
-              method: r.method,
-              amount: r.amount,
-              tendered: r.method === "CASH" && r.tendered !== null && r.tendered >= r.amount ? r.tendered : undefined,
-            })),
+          payments: paymentParts(rows),
         }),
       (res) => {
         reset();
@@ -72,7 +68,7 @@ export function CounterPanel() {
           <ShoppingCart className="size-5" aria-hidden /> {dict.manage.canteen.counterSale}
         </h2>
         {count > 0 && (
-          <Button variant="ghost" size="sm" onClick={reset} disabled={pending}>
+          <Button variant="ghost" size="sm" onClick={reset} disabled={pending || locked}>
             <Trash2 aria-hidden /> {dict.pos.clearCart}
           </Button>
         )}
@@ -115,7 +111,7 @@ export function CounterPanel() {
           </Button>
         ) : (
           <div className="grid grid-cols-[auto_1fr] gap-2">
-            <Button size="lg" variant="outline" className="h-14" onClick={() => setStep("items")} disabled={pending}>
+            <Button size="lg" variant="outline" className="h-14" onClick={() => setStep("items")} disabled={pending || locked}>
               {dict.common.back}
             </Button>
             <Button size="lg" className="h-14 text-lg" onClick={charge} disabled={pending || !balanced || !data.shift}>

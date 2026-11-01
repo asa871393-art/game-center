@@ -21,6 +21,7 @@ import {
   transferSession,
 } from "@/server/services/pos";
 import { addShiftExpense, closeShift, openShift, voidShiftExpense } from "@/server/services/shift";
+import { cancelZainCash, requestZainCash } from "@/server/services/zaincash";
 
 export type { PosActionResult };
 
@@ -33,6 +34,7 @@ const payments = z
       method: z.enum(["CASH", "CARD", "ZAINCASH", "FASTPAY"]),
       amount: z.number().int().positive(),
       tendered: z.number().int().positive().optional(),
+      zainCashPaymentId: id.optional(),
     }),
   )
   .max(6);
@@ -187,4 +189,20 @@ const deviceStatusSchema = base.extend({ deviceId: id, status: z.enum(["IDLE", "
 /** Taking devices in and out of service is a manager decision. */
 export async function setDeviceStatusAction(payload: z.input<typeof deviceStatusSchema>) {
   return run(deviceStatusSchema, payload, "MANAGER", (ctx, i) => setDeviceStatus(ctx, i));
+}
+
+const zainCashRequestSchema = base.extend({ amount: z.number().int().positive() });
+
+/** Opens a ZainCash payment for the customer to scan (gateway connected only). */
+export async function requestZainCashAction(payload: z.input<typeof zainCashRequestSchema>) {
+  return run(zainCashRequestSchema, payload, "STAFF", (ctx, i) => requestZainCash(ctx, { amount: i.amount, language: i.locale === "en" ? "en" : "ar" }));
+}
+
+const zainCashIdSchema = base.extend({ paymentId: id });
+
+export async function cancelZainCashAction(payload: z.input<typeof zainCashIdSchema>) {
+  return run(zainCashIdSchema, payload, "STAFF", async (ctx, i) => {
+    await cancelZainCash(ctx, i.paymentId);
+    return null;
+  });
 }

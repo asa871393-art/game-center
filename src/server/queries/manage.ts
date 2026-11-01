@@ -7,6 +7,7 @@ import { toMinor } from "@/lib/money";
 import { db } from "@/server/db";
 import { CHECK_IN_EARLY_MINUTES, getOpenShift, NO_SHOW_GRACE_MINUTES } from "@/server/services/pos";
 import { getShiftSummary } from "@/server/services/shift";
+import { zainCashConfig } from "@/server/payments/zaincash";
 
 /** A booking starting within this window shows its device as RESERVED. */
 export const RESERVED_LEAD_MINUTES = 30;
@@ -189,6 +190,8 @@ export async function getPosBoard(loungeId: string, now = new Date()) {
     businessDay: { date: day.date, start: iso(dayStart), end: iso(dayEnd), isOpen: day.isOpen },
     /** The lounge's open cashier shift (cash drawer), or null when none is open. */
     shift,
+    /** ZainCash goes through the gateway (QR + automatic confirmation) instead of a manual confirmation. */
+    zainCashGateway: zainCashConfig() !== null,
     generatedAt: iso(now),
     zones: lounge.zones.map((z) => ({ id: z.id, name: z.name, color: z.color })),
     categories: lounge.categories.map((c) => ({

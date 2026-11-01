@@ -103,9 +103,11 @@ export function OrderDialog({ open, onOpenChange, session, deviceName }: OrderDi
               <ToggleGroupItem value="CARD" className="h-11 flex-1">
                 <CreditCard aria-hidden /> {dict.manage.checkout.CARD}
               </ToggleGroupItem>
-              <ToggleGroupItem value="ZAINCASH" className="h-11 flex-1">
-                <Smartphone aria-hidden /> {dict.pos.method.ZAINCASH}
-              </ToggleGroupItem>
+              {!data.zainCashGateway && (
+                <ToggleGroupItem value="ZAINCASH" className="h-11 flex-1">
+                  <Smartphone aria-hidden /> {dict.pos.method.ZAINCASH}
+                </ToggleGroupItem>
+              )}
             </ToggleGroup>
           )}
         </div>

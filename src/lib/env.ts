@@ -29,6 +29,16 @@ const envSchema = z.object({
    * list and can sign in by PIN. Unset: any browser can, which suits a POS reachable only in the lounge.
    */
   POS_TERMINAL_CODE: optionalString,
+  /**
+   * ZainCash payment gateway (API v2). With both set, ZainCash payments at the counter go through
+   * ZainCash (the customer scans a QR and pays) instead of the cashier confirming them by hand.
+   */
+  ZAINCASH_CLIENT_ID: optionalString,
+  ZAINCASH_CLIENT_SECRET: optionalString,
+  /** "uat" (ZainCash's test environment, the default) or "live". */
+  ZAINCASH_ENV: z.enum(["uat", "live"]).default("uat"),
+  /** Overrides the gateway URL (tests, or a live URL ZainCash gives you). */
+  ZAINCASH_BASE_URL: optionalString,
 });
 
 const MIN_SECRET_LENGTH = 32;
