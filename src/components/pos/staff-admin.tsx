@@ -1,10 +1,12 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Copy, Grid3x3, Loader2, UserMinus, UserPlus } from "lucide-react";
+import { ArrowLeft, ArrowRight, Copy, Grid3x3, Loader2, Pencil, UserMinus, UserPlus } from "lucide-react";
 import Link from "next/link";
 import { useState, useTransition } from "react";
 import { toast } from "sonner";
+import { EditForm } from "@/components/manage/staff-manager";
 import { Button, buttonVariants } from "@/components/ui/button";
+import { Dialog, DialogContent } from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { useI18n } from "@/i18n/client";
 import type { LoungeMemberRole } from "@/lib/db/types";
@@ -37,6 +39,7 @@ export function StaffAdmin({ data }: { data: StaffAdminData }) {
   const [busyId, setBusyId] = useState<string | null>(null);
   const [pinFor, setPinFor] = useState<string | null>(null);
   const [pin, setPin] = useState("");
+  const [editing, setEditing] = useState<LoungeStaffRow | null>(null);
   const Back = dir === "rtl" ? ArrowRight : ArrowLeft;
   const isOwner = data.viewer.role === "OWNER";
   const validEmail = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email.trim());
@@ -176,6 +179,11 @@ export function StaffAdmin({ data }: { data: StaffAdminData }) {
                     {m.email}
                   </div>
                 )}
+                {m.phone && (
+                  <div dir="ltr" className="truncate text-start text-sm text-muted-foreground">
+                    {m.phone}
+                  </div>
+                )}
                 <div className="mt-1 flex flex-wrap gap-1.5 text-xs">
                   <Tag icon={<Grid3x3 className="size-3" aria-hidden />} tone={m.hasPin ? "ok" : "wait"}>
                     {m.hasPin ? s.pinSet : s.pinMissing}
@@ -185,6 +193,10 @@ export function StaffAdmin({ data }: { data: StaffAdminData }) {
               </div>
               {canPin(m) && pinFor !== m.memberId && (
                 <div className="flex gap-1">
+                  <Button variant="outline" className="h-11" disabled={pending} onClick={() => setEditing(m)}>
+                    <Pencil aria-hidden />
+                    {dict.staffManage.edit}
+                  </Button>
                   <Button
                     variant="outline"
                     className="h-11"
@@ -247,6 +259,20 @@ export function StaffAdmin({ data }: { data: StaffAdminData }) {
           ))}
         </ul>
       </section>
+
+      <Dialog open={editing !== null} onOpenChange={(open) => !open && setEditing(null)}>
+        <DialogContent className="sm:max-w-md">
+          {editing && (
+            <EditForm
+              loungeId={data.lounge.id}
+              member={editing}
+              // Owners change roles, except their own and other owners'.
+              canChangeRole={isOwner && editing.role !== "OWNER" && editing.userId !== data.viewer.userId}
+              onDone={() => setEditing(null)}
+            />
+          )}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
