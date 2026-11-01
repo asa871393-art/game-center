@@ -323,6 +323,22 @@ without a PIN can't sign in, so give at least one admin a PIN with the CLI befor
    and `POS_TERMINAL_CODE` (see [Branch code](#branch-code-recommended-on-a-public-url)).
 3. Give an admin a PIN against the production Firestore (`npm run staff:grant -- you@example.com --role SUPER_ADMIN --pin <digits>`).
 
+### Automatic deploys from GitHub
+
+`.github/workflows/deploy.yml` deploys every push to `main` once the CI checks pass (or run it by hand from the
+Actions tab → Deploy → Run workflow). It deploys the Firestore rules and indexes, then builds on a Linux runner and
+deploys to Netlify production, so `scripts/deploy-netlify.sh` is only needed for a manual deploy. Add these in GitHub →
+Settings → Secrets and variables → Actions:
+
+- `NETLIFY_AUTH_TOKEN` (secret): Netlify → User settings → Applications → Personal access tokens.
+- `FIREBASE_SERVICE_ACCOUNT` (secret): the whole JSON key from Firebase console → Project settings → Service accounts →
+  Generate new private key. The service account needs permission to deploy Firestore rules and indexes (the default
+  Firebase Admin SDK account has it).
+- `NETLIFY_SITE_ID` (variable, optional): defaults to the existing `game-center-lounge` site.
+
+A deploy step whose secret is missing is skipped with a warning. The app's own settings stay in Netlify's environment
+variables (step 2 above); the build pulls them from there.
+
 Don't run `db:seed` against a production project: it creates `player@gamelounge.dev` as a super admin with a published
 PIN.
 

@@ -1,0 +1,103 @@
+name: Deploy
+
+# Every push to main runs the CI checks, then (if they pass) deploys:
+#   1. Firestore security rules and indexes to the Firebase project
+#   2. the site to Netlify production
+# Can also be started by hand: Actions tab → Deploy → Run workflow.
+#
+# Repository secrets (Settings → Secrets and variables → Actions → New repository secret):
+#   NETLIFY_AUTH_TOKEN        Netlify → User settings → Applications → Personal access tokens
+#   FIREBASE_SERVICE_ACCOUNT  the whole JSON file from Firebase console → Project settings →
+#                             Service accounts → Generate new private key
+# Optional repository variable (same page, Variables tab):
+#   NETLIFY_SITE_ID           defaults to the existing game-center-lounge site
+# A step whose secret is missing is skipped with a warning instead of failing.
+#
+# The app's runtime settings (AUTH_SECRET, FIREBASE_*, POS_TERMINAL_CODE, ZAINCASH_*, ...) are NOT
+# read from GitHub: they live in Netlify → Site configuration → Environment variables, and the
+# Netlify build below pulls them from there.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-production
+  cancel-in-progress: false
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  firestore:
+    name: Deploy Firestore rules and indexes
+    needs: checks
+    runs-on: ubuntu-latest
+    env:
+      FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Check for the Firebase secret
+        id: secret
+        run: |
+          if [ -z "$FIREBASE_SERVICE_ACCOUNT" ]; then
+            echo "::warning::FIREBASE_SERVICE_ACCOUNT is not set; skipping the Firestore rules/indexes deploy."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/setup-node@v4
+        if: steps.secret.outputs.present == 'true'
+        with:
+          node-version: 22
+          cache: npm
+      - name: Deploy rules and indexes
+        if: steps.secret.outputs.present == 'true'
+        run: |
+          npm ci --no-audit --no-fund
+          key="$RUNNER_TEMP/firebase-service-account.json"
+          printf '%s' "$FIREBASE_SERVICE_ACCOUNT" > "$key"
+          project="$(node -e "process.stdout.write(require(process.argv[1]).project_id)" "$key")"
+          GOOGLE_APPLICATION_CREDENTIALS="$key" npx firebase deploy \
+            --only firestore:rules,firestore:indexes --project "$project" --non-interactive
+          rm -f "$key"
+
+  netlify:
+    name: Deploy to Netlify
+    needs: [checks, firestore]
+    runs-on: ubuntu-latest
+    environment:
+      name: production
+      url: https://game-center-lounge.netlify.app
+    env:
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+      NETLIFY_SITE_ID: ${{ vars.NETLIFY_SITE_ID || 'f8784cef-07b4-44fd-bbd8-36f069370a20' }}
+      NETLIFY_CLI: netlify-cli@23.15.1
+      NEXT_TELEMETRY_DISABLED: "1"
+    steps:
+      - name: Check for the Netlify secret
+        id: secret
+        run: |
+          if [ -z "$NETLIFY_AUTH_TOKEN" ]; then
+            echo "::warning::NETLIFY_AUTH_TOKEN is not set; skipping the Netlify deploy."
+            echo "present=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          fi
+      - uses: actions/checkout@v4
+        if: steps.secret.outputs.present == 'true'
+      - uses: actions/setup-node@v4
+        if: steps.secret.outputs.present == 'true'
+        with:
+          node-version: 24
+          cache: npm
+      - name: Build and deploy
+        if: steps.secret.outputs.present == 'true'
+        env:
+          MSG: ${{ github.event.head_commit.message || 'Manual deploy' }}
+        run: |
+          npm ci --no-audit --no-fund
+          # Builds on this Linux runner (with the Netlify site's environment variables), then deploys.
+          npx -y "$NETLIFY_CLI" deploy --build --prod --site "$NETLIFY_SITE_ID" \
+            --message "$(printf '%s' "$MSG" | head -n1)"
