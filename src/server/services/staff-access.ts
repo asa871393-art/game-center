@@ -5,6 +5,7 @@ import { canManageMember } from "@/lib/staff-permissions";
 import { db, type TxClient } from "@/server/db";
 import { isStaffRole } from "@/server/staff";
 import { getOpenShift, PosError, type PosContext } from "./pos";
+import { assertPinFree } from "./pos-pin";
 
 /**
  * Cashier access by email. A lounge manager (or the seed / CLI) names a Google account; the
@@ -107,6 +108,10 @@ export async function addStaffMember(
 ): Promise<GrantResult> {
   if (input.role === "MANAGER" && input.actorRole !== "OWNER") throw new PosError("FORBIDDEN");
   if (input.pin !== null && isWeakPin(input.pin)) throw new PosError("WEAK_PIN");
+  if (input.pin !== null) {
+    const existing = await db.user.findUnique({ where: { email: input.email.trim().toLowerCase() }, select: { id: true } });
+    await assertPinFree(ctx.loungeId, input.pin, existing?.id ?? "");
+  }
   const pinHash = input.pin === null ? null : await hashPin(input.pin);
   return db.$transaction(async (tx) => {
     const result = await grantIn(tx, ctx.loungeId, input);

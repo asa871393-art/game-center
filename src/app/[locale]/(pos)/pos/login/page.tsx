@@ -22,7 +22,7 @@ export async function generateMetadata(): Promise<Metadata> {
 }
 
 /**
- * The only sign-in: pick your name on the branch's PIN keypad and type your PIN. Staff who are
+ * The only sign-in: type your PIN on the branch's keypad, and the PIN says who you are. Staff who are
  * already signed in go straight on to the page they asked for (the POS by default).
  */
 export default function PosLoginPage({ searchParams }: PageProps<"/[locale]/pos/login">) {
@@ -54,7 +54,7 @@ async function CashierLogin({ searchParams }: Pick<PageProps<"/[locale]/pos/logi
 
   const error = typeof sp.error === "string" ? signInErrorMessage(sp.error, dict.auth) : undefined;
   const p = dict.posLogin;
-  // Browsers that haven't entered the branch code see neither the branch nor its staff.
+  // Browsers that haven't entered the branch code don't see the branch or its keypad.
   const trusted = await isTrustedTerminal();
   const lounge = trusted ? await getPinLounge() : null;
   return (

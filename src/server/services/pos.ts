@@ -57,6 +57,7 @@ export type PosErrorCode =
   | "WEAK_PIN"
   | "EMAIL_TAKEN"
   | "PHONE_TAKEN"
+  | "PIN_TAKEN"
   | "ZAINCASH_UNPAID"
   | "ZAINCASH_AMOUNT"
   | "GATEWAY_ERROR";

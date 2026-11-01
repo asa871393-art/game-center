@@ -1,15 +1,14 @@
 "use client";
 
-import { ArrowLeft, ArrowRight, Delete, Loader2, Lock } from "lucide-react";
+import { Delete, Loader2, Lock } from "lucide-react";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { useI18n } from "@/i18n/client";
 import { PIN_MAX_LENGTH, PIN_MIN_LENGTH } from "@/lib/pin";
 import { cn } from "@/lib/utils";
-import type { PinStaffMember } from "@/server/services/pos-pin";
 
-type Status = { kind: "idle" } | { kind: "wrong"; attemptsLeft: number } | { kind: "locked"; until: number } | { kind: "error" };
+type Status = { kind: "idle" } | { kind: "wrong"; attemptsLeft: number } | { kind: "shared" } | { kind: "locked"; until: number } | { kind: "error" };
 
 /** "0:45", "12:00", "3:05:00": how long a PIN lock still lasts. */
 function formatWait(seconds: number): string {
@@ -20,22 +19,19 @@ function formatWait(seconds: number): string {
 }
 
 /**
- * The sign-in keypad: pick your name, type your PIN on the keypad (or a keyboard). Posts to
- * /api/auth/pos-pin, which checks the PIN and its lockout and sets the session.
+ * The sign-in keypad: type your PIN on the keypad (or a keyboard); the PIN alone says who you are.
+ * Posts to /api/auth/pos-pin, which finds whose PIN it is, checks the lockout and sets the session.
  */
-export function PinKeypad({ staff, callbackUrl }: { staff: PinStaffMember[]; callbackUrl: string }) {
-  const { dict, locale, dir, t } = useI18n();
+export function PinKeypad({ callbackUrl }: { callbackUrl: string }) {
+  const { dict, locale, t } = useI18n();
   const p = dict.posLock;
   const router = useRouter();
-  const [userId, setUserId] = useState<string | null>(staff.length === 1 ? staff[0].userId : null);
   const [pin, setPin] = useState("");
   const [busy, setBusy] = useState(false);
   const [status, setStatus] = useState<Status>({ kind: "idle" });
   const [now, setNow] = useState(() => Date.now());
-  const selected = staff.find((s) => s.userId === userId) ?? null;
   const lockedFor = status.kind === "locked" ? Math.max(0, Math.ceil((status.until - now) / 1000)) : 0;
   const blocked = busy || lockedFor > 0;
-  const Back = dir === "rtl" ? ArrowRight : ArrowLeft;
 
   useEffect(() => {
     if (status.kind !== "locked") return;
@@ -44,15 +40,15 @@ export function PinKeypad({ staff, callbackUrl }: { staff: PinStaffMember[]; cal
   }, [status.kind]);
 
   const submit = async (value: string) => {
-    if (!selected || blocked || value.length < PIN_MIN_LENGTH) return;
+    if (blocked || value.length < PIN_MIN_LENGTH) return;
     setBusy(true);
     try {
       const res = await fetch("/api/auth/pos-pin", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ userId: selected.userId, pin: value, locale, callbackUrl }),
+        body: JSON.stringify({ pin: value, locale, callbackUrl }),
       });
-      const body = (await res.json().catch(() => ({}))) as { redirectTo?: string; attemptsLeft?: number; retryAfter?: number };
+      const body = (await res.json().catch(() => ({}))) as { error?: string; redirectTo?: string; attemptsLeft?: number; retryAfter?: number };
       if (res.ok && body.redirectTo) {
         // Full navigation so the new session cookie is used everywhere.
         window.location.assign(body.redirectTo);
@@ -62,7 +58,8 @@ export function PinKeypad({ staff, callbackUrl }: { staff: PinStaffMember[]; cal
       if (res.status === 429) {
         setNow(Date.now());
         setStatus({ kind: "locked", until: Date.now() + (body.retryAfter ?? 60) * 1000 });
-      } else if (res.status === 401) setStatus({ kind: "wrong", attemptsLeft: body.attemptsLeft ?? 0 });
+      } else if (res.status === 409 && body.error === "SHARED_PIN") setStatus({ kind: "shared" });
+      else if (res.status === 401) setStatus({ kind: "wrong", attemptsLeft: body.attemptsLeft ?? 0 });
       else if (res.status === 403) router.refresh();
       else setStatus({ kind: "error" });
     } catch {
@@ -81,7 +78,6 @@ export function PinKeypad({ staff, callbackUrl }: { staff: PinStaffMember[]; cal
   };
 
   const keyHandler = (e: KeyboardEvent) => {
-    if (!selected) return;
     if (/^\d$/.test(e.key)) press(e.key);
     else if (e.key === "Backspace") setPin((v) => v.slice(0, -1));
     else if (e.key === "Enter") void submit(pin);
@@ -93,58 +89,20 @@ export function PinKeypad({ staff, callbackUrl }: { staff: PinStaffMember[]; cal
     return () => window.removeEventListener("keydown", keyHandler);
   });
 
-  if (!selected) {
-    return (
-      <div className="space-y-3">
-        <p className="text-center text-sm text-muted-foreground">{p.chooseStaff}</p>
-        <ul className="grid grid-cols-2 gap-2">
-          {staff.map((s) => (
-            <li key={s.userId}>
-              <button
-                type="button"
-                onClick={() => {
-                  setUserId(s.userId);
-                  setPin("");
-                  setStatus({ kind: "idle" });
-                }}
-                className="flex h-20 w-full flex-col items-center justify-center gap-1 rounded-2xl border bg-muted/30 px-2 text-center hover:bg-muted active:scale-[0.98]"
-              >
-                <span className="flex size-8 items-center justify-center rounded-full bg-primary/20 text-sm font-bold text-primary">
-                  {s.name.slice(0, 1).toUpperCase()}
-                </span>
-                <span className="w-full truncate text-sm font-semibold">{s.name}</span>
-              </button>
-            </li>
-          ))}
-        </ul>
-      </div>
-    );
-  }
-
   const message =
     lockedFor > 0
       ? t(p.locked, { time: formatWait(lockedFor) })
       : status.kind === "wrong"
         ? t(p.wrongPin, { count: status.attemptsLeft })
-        : status.kind === "error"
-          ? p.error
-          : null;
+        : status.kind === "shared"
+          ? p.sharedPin
+          : status.kind === "error"
+            ? p.error
+            : null;
 
   return (
     <div className="space-y-4">
-      <div className="flex items-center gap-2">
-        {staff.length > 1 && (
-          <Button variant="ghost" size="icon-lg" onClick={() => setUserId(null)} title={p.switchStaff} disabled={busy}>
-            <Back aria-hidden />
-            <span className="sr-only">{p.switchStaff}</span>
-          </Button>
-        )}
-        <div className="min-w-0 flex-1 text-center">
-          <div className="truncate font-semibold">{t(p.hello, { name: selected.name })}</div>
-          <div className="text-sm text-muted-foreground">{p.enterPin}</div>
-        </div>
-        {staff.length > 1 && <span className="size-10" aria-hidden />}
-      </div>
+      <div className="text-center font-semibold">{p.enterPin}</div>
 
       <div dir="ltr" className="flex h-8 items-center justify-center gap-3" role="status" aria-label={p.pin}>
         {Array.from({ length: Math.max(PIN_MIN_LENGTH, pin.length) }, (_, i) => (
