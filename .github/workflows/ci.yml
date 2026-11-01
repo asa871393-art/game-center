@@ -1,9 +1,9 @@
 name: CI
 
 on:
-  push:
-    branches: [main]
   pull_request:
+  # Pushes to main run these same checks through deploy.yml, which deploys only when they pass.
+  workflow_call:
 
 concurrency:
   group: ci-${{ github.ref }}
