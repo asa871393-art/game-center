@@ -87,5 +87,28 @@ export const firebaseAdminConfig =
       }
     : null;
 
+/**
+ * On Google-managed runtimes (Firebase App Hosting) no key is needed: the runtime sets FIREBASE_CONFIG
+ * (`{"projectId", "storageBucket", ...}`) and the Admin SDK signs in as the backend's own service account.
+ * Used only when no service-account key is set; explicit env values win over FIREBASE_CONFIG.
+ */
+function readManagedFirebaseConfig(): { projectId: string; storageBucket?: string } | null {
+  const raw = process.env.FIREBASE_CONFIG?.trim();
+  if (!raw?.startsWith("{")) return null;
+  try {
+    const cfg = JSON.parse(raw) as { projectId?: unknown; storageBucket?: unknown };
+    const projectId = env.NEXT_PUBLIC_FIREBASE_PROJECT_ID ?? (typeof cfg.projectId === "string" ? cfg.projectId : undefined);
+    if (!projectId) return null;
+    const bucket = env.NEXT_PUBLIC_FIREBASE_STORAGE_BUCKET ?? (typeof cfg.storageBucket === "string" ? cfg.storageBucket : undefined);
+    return { projectId, storageBucket: bucket || undefined };
+  } catch {
+    return null;
+  }
+}
+
+export const firebaseManagedConfig = firebaseAdminConfig ? null : readManagedFirebaseConfig();
+
 /** Product-image uploads go through the Admin SDK, so they need its credentials plus a bucket. */
-export const isFirebaseStorageEnabled = Boolean(firebaseAdminConfig?.storageBucket);
+export const isFirebaseStorageEnabled = Boolean(
+  firebaseAdminConfig?.storageBucket ?? firebaseManagedConfig?.storageBucket,
+);
