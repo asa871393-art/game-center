@@ -137,3 +137,24 @@
   --device-vip: oklch(0.769 0.188 70.08);
   --device-other: oklch(0.556 0 0);
 }
+
+/* Al Asas loading splash (components/brand/brand-splash.tsx). */
+@keyframes brand-breathe {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.75;
+    transform: scale(0.97);
+  }
+}
+@keyframes brand-sweep {
+  0% {
+    transform: translateX(-120%);
+  }
+  100% {
+    transform: translateX(320%);
+  }
+}
