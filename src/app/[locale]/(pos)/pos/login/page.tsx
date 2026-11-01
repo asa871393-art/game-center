@@ -1,5 +1,6 @@
-import { Lock, TriangleAlert } from "lucide-react";
+import { TriangleAlert } from "lucide-react";
 import type { Metadata } from "next";
+import Image from "next/image";
 import { redirect } from "next/navigation";
 import { Suspense } from "react";
 import { signInErrorMessage } from "@/components/auth/sign-in-errors";
@@ -59,10 +60,15 @@ async function CashierLogin({ searchParams }: Pick<PageProps<"/[locale]/pos/logi
   return (
     <div className="w-full max-w-md space-y-6 rounded-3xl border bg-card p-6 shadow-lg sm:p-8">
       <div className="space-y-2 text-center">
-        <div className="text-sm font-semibold text-primary">
-          {dict.common.appName} - {dict.pos.controlTitle}
-        </div>
-        <Lock className="mx-auto size-10 text-primary" aria-hidden />
+        <Image
+          src="/brand/logo-full-light.png"
+          alt={dict.common.appName}
+          width={896}
+          height={460}
+          priority
+          className="mx-auto h-auto w-52"
+        />
+        <div className="text-sm font-semibold text-primary">{dict.pos.controlTitle}</div>
         <h1 className="text-2xl font-bold">{p.title}</h1>
         <p className="text-sm text-muted-foreground">{lounge ? `${lounge.name} · ${p.subtitle}` : p.subtitle}</p>
       </div>

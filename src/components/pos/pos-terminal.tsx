@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import { ChartColumn, ClipboardList, History, LayoutDashboard, Lock, Settings2, ShoppingCart, Users, UtensilsCrossed } from "lucide-react";
 import Link from "next/link";
 import { Suspense, useState } from "react";
@@ -76,6 +77,7 @@ function Terminal({ cashierName }: { cashierName: string }) {
   return (
     <div className="flex h-dvh flex-col">
       <header className="z-30 flex flex-wrap items-center gap-3 border-b bg-background/95 px-4 py-2 backdrop-blur">
+        <Image src="/brand/mark-light.png" alt={dict.common.appName} width={236} height={275} className="h-11 w-auto shrink-0" />
         <div className="min-w-0">
           <div className="truncate text-xs font-semibold text-primary">
             {dict.common.appName} - {dict.pos.controlTitle}

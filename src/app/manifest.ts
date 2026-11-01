@@ -11,9 +11,13 @@ export default function manifest(): MetadataRoute.Manifest {
     dir: "rtl",
     start_url: "/ar",
     display: "standalone",
-    background_color: "#ffffff",
-    // --primary in globals.css (light theme).
-    theme_color: "#7c3aed",
-    icons: [{ src: "/favicon.ico", sizes: "any", type: "image/x-icon" }],
+    // Al Asas brand: the POS runs dark, on near-black.
+    background_color: "#0a0a0a",
+    theme_color: "#0a0a0a",
+    icons: [
+      { src: "/favicon.ico", sizes: "any", type: "image/x-icon" },
+      { src: "/brand/icon-192.png", sizes: "192x192", type: "image/png" },
+      { src: "/brand/icon-512.png", sizes: "512x512", type: "image/png" },
+    ],
   };
 }
